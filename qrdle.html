@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR-dle: The QR Code Puzzle</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator/qrcode.js"></script>
+    <style>
+        /* Custom font */
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Style the canvas container for an app-like view */
+        .canvas-container {
+            overflow: hidden;
+            border: 4px solid #374151; /* Dark border for a more technical look */
+            background-color: #f8f8f8;
+            cursor: grab;
+            user-select: none;
+            touch-action: none;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.15), inset 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Custom style for the hint counter bubble */
+        .hint-counter {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: bold;
+            color: white;
+            background-color: #F87171; /* Red-400 */
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+            transition: background-color 0.2s;
+        }
+
+        /* Base style for all main action buttons for tactile feel */
+        .action-button-base {
+            transition: all 0.2s ease-in-out;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+            border-bottom: 3px solid rgba(0, 0, 0, 0.15); /* Subtle 3D effect */
+        }
+        .action-button-base:hover:not(:disabled) {
+             box-shadow: 0 6px 10px -2px rgba(0, 0, 0, 0.2), 0 3px 5px -3px rgba(0, 0, 0, 0.1);
+             transform: translateY(-2px);
+             border-bottom-width: 1px;
+        }
+        .action-button-base:active:not(:disabled) {
+            transform: translateY(1px);
+            box-shadow: 0 2px 3px rgba(0, 0, 0, 0.1);
+            border-bottom-width: 0;
+        }
+        .action-button-base:disabled {
+            box-shadow: none;
+            cursor: not-allowed;
+            border-bottom: 3px solid rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-start py-8">
+
+    <header class="w-full bg-gray-800 text-white shadow-lg sticky top-0 z-10">
+        <div class="max-w-xl mx-auto p-4 flex justify-between items-center">
+             <h1 class="text-xl font-bold">QR-dle 🧩</h1>
+             <span class="text-sm font-light text-gray-400">Guess the QR Code!</span>
+        </div>
+    </header>
+
+    <div class="w-full max-w-xl bg-white shadow-2xl rounded-xl p-6 md:p-8 space-y-6 mt-4">
+        <h2 class="text-3xl font-extrabold text-gray-900 text-center">
+            The QR Puzzle ◼️
+        </h2>
+        <p class="text-center text-gray-600 text-sm md:text-base border-b pb-4 border-gray-200">
+            <span class="font-bold text-red-600">Rule:</span> You get **6 guesses per check** to paint a white module black. Undoing one of those 6 guesses returns that slot. **Green squares are locked.**
+        </p>
+
+        <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+            <input type="url" id="urlInput" value="https://www.google.com" placeholder="Enter URL or Text"
+                    class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 shadow-inner transition">
+            <button id="generateButton"
+                    class="action-button-base px-4 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
+                ✨ Generate Target
+            </button>
+        </div>
+        
+        <div class="flex justify-center pt-2">
+            <button id="saveButton" 
+                    style="display: none;"
+                    class="action-button-base w-full md:w-auto px-6 py-2 bg-purple-600 text-white font-semibold rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-4 focus:ring-purple-500">
+                💾 Save QR Code (Perfect Victory)
+            </button>
+        </div>
+
+        <div class="pt-2">
+            <input type="text" id="cheatCodeInput" placeholder="Enter cheat code (try 'admin' or 'done')..."
+                    class="w-full p-2 text-sm border border-yellow-400 rounded-lg focus:ring-yellow-500 focus:border-yellow-500 shadow-inner bg-yellow-50 placeholder-gray-500">
+        </div>
+
+        <div id="statusMessage" class="text-center p-3 text-sm rounded-lg font-medium bg-blue-100 text-blue-800 transition border border-blue-300">
+            Enter a URL or text and click "Generate Target" to begin the puzzle.
+        </div>
+
+        <hr class="border-gray-300">
+
+        <div class="space-y-4">
+            <div class="flex flex-wrap justify-center space-x-2 md:space-x-3">
+                <button id="zoomOutButton" class="my-1 px-4 py-2 text-sm bg-gray-200 text-gray-700 font-medium rounded-lg shadow-md hover:bg-gray-300 transition focus:ring-2 focus:ring-gray-400">
+                    <span class="font-bold">−</span> Zoom Out
+                </button>
+                <button id="resetViewButton" class="my-1 px-4 py-2 text-sm bg-blue-100 text-blue-700 font-medium rounded-lg shadow-md hover:bg-blue-200 transition focus:ring-2 focus:ring-blue-400">
+                    <span class="font-bold">⌂</span> Reset View
+                </button>
+                <button id="zoomInButton" class="my-1 px-4 py-2 text-sm bg-gray-200 text-gray-700 font-medium rounded-lg shadow-md hover:bg-gray-300 transition focus:ring-2 focus:ring-gray-400">
+                    <span class="font-bold">+</span> Zoom In
+                </button>
+            </div>
+
+            <div class="canvas-container w-full aspect-square mx-auto rounded-xl">
+                <canvas id="qrCanvas" width="500" height="500"></canvas>
+            </div>
+        </div>
+
+        <div class="flex flex-col md:flex-row justify-center space-y-3 md:space-y-0 md:space-x-4 mt-6">
+            <button id="checkButton" disabled
+                    class="action-button-base flex-grow px-8 py-3 bg-indigo-600 text-white font-semibold rounded-lg opacity-50
+                            focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50 hover:bg-indigo-700">
+                ✅ Check Pattern
+            </button>
+            <button id="hintButton" disabled
+                    class="action-button-base relative flex-grow px-8 py-3 bg-yellow-500 text-white font-semibold rounded-lg opacity-50
+                            focus:outline-none focus:ring-4 focus:ring-yellow-500 hover:bg-yellow-600">
+                💡 Hint
+                <span id="hintCounter" class="hint-counter">3</span>
+            </button>
+        </div>
+        
+        <div id="messageBox" class="text-center p-4 mt-4 text-sm rounded-lg font-bold bg-gray-100 text-gray-700 border-2 border-gray-200 shadow-inner">
+            <p>Ready to generate a pattern!</p>
+            <p class="mt-2 text-xs text-gray-500">The detailed score breakdown and missing quadrant hint will appear here after your first check.</p>
+        </div>
+        
+        <div class="flex justify-center mt-8 pt-4 border-t border-gray-300">
+             <button id="clearButton"
+                    class="action-button-base w-full md:w-auto px-8 py-3 bg-red-100 text-red-700 font-semibold rounded-lg hover:bg-red-200 focus:outline-none focus:ring-4 focus:ring-red-500">
+                <span class="text-lg leading-none align-middle mr-1">🗑️</span> Wipe Grid
+            </button>
+        </div>
+    </div>
+    
+    <div class="p-4 text-center text-xs text-gray-500 mt-4 max-w-xl">
+        A QR-dle puzzle by Gemini. Hint color codes: Green=Correct/Locked, Red=Wrong/No match, Yellow/Orange/Dark Red=Proximity match (1-4 adjacent correct modules).
+    </div>
+
+    <script>
+        // --- Core Configuration ---
+        let GRID_SIZE = 29; 
+        const CANVAS_DIMENSION = 500; 
+        const QR_IMAGE_SIZE = 400; 
+        let CELL_SIZE = QR_IMAGE_SIZE / GRID_SIZE;
+        const BLACK_COUNT_BUFFER = 10; 
+        const MAX_PLACEMENTS_PER_ROUND = 6; 
+        const MAX_HINTS = 3; 
+        const EXPORT_SIZE = 500; // Resolution of the exported image
+
+        // View/Interaction Constants
+        const MIN_SCALE = 0.5;
+        const MAX_SCALE = 5.0;
+        const MOVEMENT_TOLERANCE = 5; 
+
+        // --- Global State ---
+        let solutionData = []; 
+        let totalSolutionBlack = 0; 
+        let userData = []; 
+        let currentBlackCount = 0; 
+        let isCellChanged = false; 
+        let placementsThisRound = []; 
+        let isCheating = false; 
+        let hintsRemaining = MAX_HINTS; 
+        let hintedCells = []; 
+        let isSolved = false; 
+        
+        let lastCheckStatus = []; 
+        
+        let canvas, ctx;
+        
+        // Panning/Zooming State
+        let scale = 1.0;
+        let panOffset = { x: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2, y: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2 };
+        let isDragging = false;
+        let lastMousePos = { x: 0, y: 0 };
+        let startClickPos = { x: 0, y: 0 };
+
+        const checkButton = document.getElementById('checkButton');
+        const hintButton = document.getElementById('hintButton');
+        const hintCounter = document.getElementById('hintCounter');
+        const saveButton = document.getElementById('saveButton'); 
+        const statusMessage = document.getElementById('statusMessage');
+        const messageBox = document.getElementById('messageBox');
+        const cheatCodeInput = document.getElementById('cheatCodeInput');
+
+
+        /**
+         * Initializes the 2D array data structures and resets the game state.
+         * @param {number} size - The new dimension of the square grid.
+         */
+        function initializeGrid(size) {
+            GRID_SIZE = size;
+            CELL_SIZE = QR_IMAGE_SIZE / GRID_SIZE;
+            
+            userData = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+            lastCheckStatus = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+            
+            isCellChanged = false;
+            currentBlackCount = 0;
+            placementsThisRound = []; 
+            
+            hintsRemaining = MAX_HINTS; 
+            hintedCells = []; 
+            isSolved = false; 
+            updateHintButtonUI();
+
+            checkButton.disabled = true;
+            checkButton.classList.add('opacity-50', 'cursor-not-allowed');
+            checkButton.classList.remove('hover:bg-indigo-700');
+            
+            // HIDE save button at start
+            saveButton.style.display = 'none';
+            
+            // Reset view
+            panOffset = { x: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2, y: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2 };
+            scale = 1.0;
+        }
+
+        /**
+         * Generates the QR code data for the input URL/text and sets up the game.
+         */
+        function generateQrTarget(text) {
+            try {
+                const qr = qrcode(0, 'L'); 
+                qr.addData(text);
+                qr.make();
+
+                const size = qr.getModuleCount();
+                initializeGrid(size); 
+                
+                totalSolutionBlack = 0;
+                solutionData = Array(size).fill(0).map(() => Array(size).fill(0));
+                
+                for (let r = 0; r < size; r++) {
+                    for (let c = 0; c < size; c++) {
+                        if (qr.isDark(r, c)) {
+                            solutionData[r][c] = 1;
+                            totalSolutionBlack++;
+                        }
+                    }
+                }
+                
+                // Set messageBox to neutral ready state
+                messageBox.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'border-red-200', 'border-green-200', 'border-yellow-200');
+                messageBox.classList.add('bg-gray-100', 'text-gray-700', 'border-gray-200');
+                messageBox.innerHTML = `
+                    <p><strong>Puzzle Ready:</strong> Start guessing the pattern using your ${MAX_PLACEMENTS_PER_ROUND} placements per check.</p>
+                    <p class="mt-2 text-xs text-gray-500">Use the color hints after checking to guide your next round!</p>
+                `;
+
+                statusMessage.textContent = `Target generated. Grid Size: ${size}x${size}. Total black modules: ${totalSolutionBlack}. You have ${MAX_PLACEMENTS_PER_ROUND} placements remaining this round.`;
+                statusMessage.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-200', 'text-yellow-900');
+                statusMessage.classList.add('bg-blue-100', 'text-blue-800');
+
+                // Enable hint button if totalSolutionBlack > 0 (handled by updateHintButtonUI)
+                updateHintButtonUI();
+                
+                // HIDE save button
+                saveButton.style.display = 'none';
+                
+                draw(true);
+
+            } catch (error) {
+                console.error("QR Code Generation Error:", error);
+                statusMessage.textContent = 'Error generating QR code. Try a shorter input or a valid URL format.';
+                statusMessage.classList.remove('bg-blue-100');
+                statusMessage.classList.add('bg-red-100', 'text-red-800');
+                solutionData = []; 
+                hintButton.disabled = true;
+                hintButton.classList.add('opacity-50', 'cursor-not-allowed');
+                saveButton.style.display = 'none';
+            }
+        }
+        
+        /**
+         * Checks how many correct black modules are adjacent (up, down, left, right) to the given cell.
+         */
+        function getAdjacentBlackCount(r, c) {
+            let count = 0;
+            const directions = [
+                [0, 1], [0, -1], [1, 0], [-1, 0] 
+            ];
+            
+            for (const [dr, dc] of directions) {
+                const nr = r + dr;
+                const nc = c + dc;
+
+                if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
+                    if (solutionData[nr][nc] === 1) {
+                        count++;
+                    }
+                }
+            }
+            return count;
+        }
+
+
+        /**
+         * Compares the user's pattern against the solution and updates the visual feedback.
+         */
+        function checkPattern() {
+            if (!isCellChanged && cheatCodeInput.value.toLowerCase() !== 'done') return;
+            
+            const maxAllowedBlack = totalSolutionBlack + BLACK_COUNT_BUFFER;
+
+            // --- CHEAT: Handle 'done' code (Auto-solve) ---
+            if (cheatCodeInput.value.toLowerCase() === 'done') {
+                for (let r = 0; r < GRID_SIZE; r++) {
+                    for (let c = 0; c < GRID_SIZE; c++) {
+                        userData[r][c] = solutionData[r][c];
+                        lastCheckStatus[r][c] = solutionData[r][c];
+                    }
+                }
+                currentBlackCount = totalSolutionBlack;
+                cheatCodeInput.value = ''; // Clear cheat code input
+            }
+            // --- END CHEAT ---
+
+
+            // --- Failsafe: Check Relaxed Upper Limit ---
+            if (currentBlackCount > maxAllowedBlack) {
+                messageBox.classList.remove('bg-yellow-100', 'bg-green-100', 'text-yellow-800', 'text-green-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-green-200', 'border-gray-200');
+                messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
+                messageBox.innerHTML = `🛑 **Failsafe:** You have painted **${currentBlackCount}** black modules, exceeding the max allowed (${maxAllowedBlack}). Remove some black modules to check!`;
+                
+                isCellChanged = false; 
+                checkButton.disabled = true;
+                checkButton.classList.add('opacity-50', 'cursor-not-allowed');
+                checkButton.classList.remove('hover:bg-indigo-700');
+                saveButton.style.display = 'none'; // Ensure save button is hidden
+                return; 
+            }
+            // --- End Failsafe Check ---
+
+            let correctCount = 0;
+            const hintCounts = { 4: 0, 5: 0, 6: 0, 7: 0, 2: 0 }; 
+            
+            const mid = GRID_SIZE / 2;
+            const missingBlackMap = { TL: 0, TR: 0, BL: 0, BR: 0 };
+
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    
+                    if (userData[r][c] === 1) {
+                        // Scoring the user's black placement
+                        if (solutionData[r][c] === 1) {
+                            lastCheckStatus[r][c] = 1; // Green (Lock status)
+                            correctCount++;
+                        } else {
+                            // Incorrect guess - Determine proximity hint
+                            const adjacentCount = getAdjacentBlackCount(r, c);
+                            let status;
+                            if (adjacentCount === 1) status = 4;
+                            else if (adjacentCount === 2) status = 5;
+                            else if (adjacentCount === 3) status = 6;
+                            else if (adjacentCount >= 4) status = 7;
+                            else status = 2; // Completely Wrong (Red)
+
+                            lastCheckStatus[r][c] = status;
+                            hintCounts[status]++;
+                        }
+                    } else {
+                        // User painted white.
+                        
+                        // IMPORTANT: Do NOT overwrite a previous correct (1) status.
+                        if (lastCheckStatus[r][c] !== 1) {
+                             lastCheckStatus[r][c] = 3; // Neutral White status
+                        }
+                        
+                        // --- ANALYZE MISSING BLACKS FOR HINT ---
+                        if (solutionData[r][c] === 1) { // If it should be black but user left it white
+                            const rKey = r < mid ? 'T' : 'B';
+                            const cKey = c < mid ? 'L' : 'R';
+                            missingBlackMap[rKey + cKey]++;
+                        }
+                    }
+                }
+            }
+
+            // --- Determine Missing Quadrant Hint ---
+            let mostMissingQuadrant = 'No quadrant';
+            let maxMissing = 0;
+            
+            for (const key in missingBlackMap) {
+                if (missingBlackMap[key] > maxMissing) {
+                    maxMissing = missingBlackMap[key];
+                    mostMissingQuadrant = key;
+                }
+            }
+            
+            const readableQuadrant = {
+                TL: "Top Left", TR: "Top Right",
+                BL: "Bottom Left", BR: "Bottom Right"
+            }[mostMissingQuadrant] || 'No quadrant';
+            
+            let hintMessage = "";
+            if (maxMissing > 0) {
+                hintMessage = `**Missing Hint:** Most missing black squares (${maxMissing}) are located in the **${readableQuadrant}** quadrant.`;
+            } else {
+                hintMessage = "You have correctly guessed all the necessary black modules! Check the hint colors to see if you have any misplaced black modules.";
+            }
+
+            // --- Check for WIN CONDITION ---
+            const isPerfectWin = correctCount === totalSolutionBlack && 
+                                 hintCounts[2] === 0 && 
+                                 hintCounts[4] === 0 && 
+                                 hintCounts[5] === 0 && 
+                                 hintCounts[6] === 0 && 
+                                 hintCounts[7] === 0;
+
+            // --- Handle Solved State ---
+            isSolved = isPerfectWin;
+            updateHintButtonUI(); 
+
+
+            // --- Reset Round State ---
+            isCellChanged = false;
+            placementsThisRound = []; 
+            checkButton.disabled = true;
+            checkButton.classList.add('opacity-50', 'cursor-not-allowed');
+            checkButton.classList.remove('hover:bg-indigo-700');
+            // --- End Reset ---
+
+            // Display results
+            const percentage = (totalSolutionBlack > 0) ? (correctCount / totalSolutionBlack) * 100 : 0;
+            
+            // Set message box colors based on result
+            messageBox.classList.remove('bg-gray-100', 'bg-red-100', 'text-gray-700', 'text-red-800', 'border-red-200', 'border-gray-200', 'border-green-200');
+            
+            let finalMessage;
+
+            if (isPerfectWin) {
+                messageBox.classList.add('bg-green-100', 'text-green-800', 'border-green-200');
+                finalMessage = "🎉 **PERFECT VICTORY!** You solved the entire pattern!";
+                
+                // SHOW Save Button on Win
+                saveButton.style.display = 'block';
+
+            } else {
+                messageBox.classList.add('bg-yellow-100', 'text-yellow-800', 'border-yellow-200');
+                
+                finalMessage = `
+                    <p class="mb-2"><strong>Score:</strong> ${correctCount}/${totalSolutionBlack} correct black modules found (${percentage.toFixed(1)}%).</p>
+                    <p class="mb-2">${hintMessage}</p>
+                    <hr class="border-yellow-300">
+                    <div class="grid grid-cols-2 text-left mt-2 text-xs md:text-sm">
+                        <span class="font-normal text-green-600">✅ Correct (Green):</span> <span class="text-right text-green-600">${correctCount}</span>
+                        <span class="font-normal text-red-600">🔴 Fully Wrong (Red):</span> <span class="text-right text-red-600">${hintCounts[2]}</span>
+                        <span class="font-normal text-yellow-600">🟡 1 Adjacent (Yellow):</span> <span class="text-right text-yellow-600">${hintCounts[4]}</span>
+                        <span class="font-normal" style="color:#CC9900;">👑 2 Adjacent (Golden Yellow):</span> <span class="text-right" style="color:#CC9900;">${hintCounts[5]}</span>
+                        <span class="font-normal text-orange-600">🟠 3 Adjacent (Orange):</span> <span class="text-right text-orange-600">${hintCounts[6]}</span>
+                        <span class="font-normal" style="color:#9F1239;">🌰 4 Adjacent (Dark Red):</span> <span class="text-right" style="color:#9F1239;">${hintCounts[7]}</span>
+                    </div>
+                    <p class="mt-4 text-sm">You have **${MAX_PLACEMENTS_PER_ROUND}** placements remaining this round.</p>
+                `;
+                // HIDE Save Button if not perfect
+                saveButton.style.display = 'none';
+            }
+            messageBox.innerHTML = finalMessage;
+
+            draw(true); // Redraw with the new status colors
+        }
+
+        /**
+         * Saves the clean, solution QR code image by opening it in a new tab.
+         */
+        function saveSolutionQrCode(event) {
+            event.preventDefault(); 
+            
+            if (saveButton.style.display === 'none') return; 
+
+            // Create a temporary, clean canvas for export
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = EXPORT_SIZE;
+            exportCanvas.height = EXPORT_SIZE;
+            const exportCtx = exportCanvas.getContext('2d');
+            
+            const exportCellSize = EXPORT_SIZE / GRID_SIZE;
+
+            // Draw white background
+            exportCtx.fillStyle = 'white';
+            exportCtx.fillRect(0, 0, EXPORT_SIZE, EXPORT_SIZE);
+
+            // Draw black modules (the solution)
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    if (solutionData[r][c] === 1) {
+                        exportCtx.fillStyle = 'black';
+                        exportCtx.fillRect(c * exportCellSize, r * exportCellSize, exportCellSize, exportCellSize);
+                    }
+                }
+            }
+            
+            const imageURL = exportCanvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.href = imageURL;
+            link.target = '_blank'; 
+            link.download = `QRdle_Solved_${new Date().toISOString().slice(0, 10)}.png`;
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            // Update success message
+            messageBox.classList.remove('bg-yellow-100', 'bg-red-100', 'text-yellow-800', 'text-red-800', 'bg-gray-100', 'text-gray-700', 'border-red-200', 'border-gray-200', 'border-yellow-200');
+            messageBox.classList.add('bg-green-100', 'text-green-800', 'border-green-200');
+            messageBox.innerHTML = `✅ **Success!** The clean QR code image has opened in a new tab. Right-click or long-press the image in the new tab to save it.`;
+            
+            // Restore original score message after a brief delay
+            setTimeout(() => {
+                checkPattern(); 
+            }, 3000);
+        }
+
+        /**
+         * Draws the current state of the grid, including cheat overlay and hints.
+         */
+        function draw(withGridLines = true) {
+            ctx.fillStyle = '#f8f8f8';
+            ctx.fillRect(0, 0, CANVAS_DIMENSION, CANVAS_DIMENSION);
+            ctx.save();
+
+            ctx.translate(panOffset.x, panOffset.y);
+            ctx.scale(scale, scale);
+
+            // 1. Draw the white base for the QR block
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, QR_IMAGE_SIZE, QR_IMAGE_SIZE);
+
+            // 2. Draw the Cheat Overlay (Solution)
+            if (isCheating) {
+                for (let r = 0; r < GRID_SIZE; r++) {
+                    for (let c = 0; c < GRID_SIZE; c++) {
+                        if (solutionData[r][c] === 1) {
+                            ctx.fillStyle = 'rgba(255, 0, 0, 0.2)'; // Semi-transparent Red
+                            ctx.fillRect(c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                        }
+                    }
+                }
+            }
+
+
+            // 3. Draw the user's modules with conditional coloring
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    const status = lastCheckStatus[r][c];
+                    let fill = null;
+                    
+                    // Priority: Green > Hint colors > Black
+                    if (status === 1) fill = '#10B981'; // Green (Correct)
+                    else if (status === 2) fill = '#EF4444'; // Red (Completely Wrong)
+                    else if (status === 4) fill = '#FBBF24'; // Yellow (1 Adjacent)
+                    else if (status === 5) fill = '#CC9900'; // GOLDEN YELLOW (2 Adjacent) 
+                    else if (status === 6) fill = '#F97316'; // Orange (3 Adjacent)
+                    else if (status === 7) fill = '#9F1239'; // Dark Red (4+ Adjacent)
+                    else if (userData[r][c] === 1) fill = 'black'; // Unscored Black
+                    else fill = 'white';
+                    
+                    if (fill && fill !== 'white') {
+                        ctx.fillStyle = fill;
+                        ctx.fillRect(c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+            }
+
+            // 4. Draw Hint Circles (Blue for visibility)
+            ctx.fillStyle = '#3B82F6'; 
+            hintedCells.forEach(({ r, c }) => {
+                const centerX = c * CELL_SIZE + CELL_SIZE / 2;
+                const centerY = r * CELL_SIZE + CELL_SIZE / 2;
+                const radius = CELL_SIZE / 4;
+
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+
+            // 5. Draw the visible grid lines
+            if (withGridLines) {
+                const gridColor = '#d1d5db'; 
+                ctx.strokeStyle = gridColor;
+                ctx.lineWidth = 1 / scale; 
+                
+                for (let i = 0; i <= GRID_SIZE; i++) {
+                    const coord = i * CELL_SIZE;
+                    ctx.beginPath();
+                    ctx.moveTo(coord, 0);
+                    ctx.lineTo(coord, QR_IMAGE_SIZE);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(0, coord);
+                    ctx.lineTo(QR_IMAGE_SIZE, coord);
+                    ctx.stroke();
+                }
+            }
+            
+            ctx.restore();
+        }
+
+        // --- Interaction Handlers (Pan/Click) and Hint/Cheat Logic ---
+        
+        function getTransformedCoordinates(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+
+            const translatedX = (x - panOffset.x) / scale;
+            const translatedY = (y - panOffset.y) / scale;
+
+            return { x: translatedX, y: translatedY };
+        }
+
+        function handleMouseDown(event) {
+            event.preventDefault(); 
+            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
+            const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+            
+            isDragging = true;
+            lastMousePos = { x: clientX, y: clientY };
+            startClickPos = { x: clientX, y: clientY };
+            canvas.style.cursor = 'grabbing';
+        }
+
+        function handleMouseMove(event) {
+            if (!isDragging) return;
+            event.preventDefault();
+
+            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
+            const clientY = event.clientY || (event.touches ? event.touches[0].clientY : 0);
+
+            const dx = clientX - lastMousePos.x;
+            const dy = clientY - lastMousePos.y;
+
+            panOffset.x += dx;
+            panOffset.y += dy;
+
+            lastMousePos = { x: clientX, y: clientY };
+
+            draw(true);
+        }
+
+        function handleMouseUp(event) {
+            if (!isDragging) return;
+            
+            const clientX = event.clientX || (event.changedTouches ? event.changedTouches[0].clientX : 0);
+            const clientY = event.clientY || (event.changedTouches ? event.changedTouches[0].clientY : 0);
+
+            const dx = clientX - startClickPos.x;
+            const dy = clientY - startClickPos.y;
+            
+            isDragging = false;
+            canvas.style.cursor = 'grab';
+
+            // Check if it was a "click" (minimal movement)
+            if (Math.sqrt(dx * dx + dy * dy) < MOVEMENT_TOLERANCE) {
+                const { x, y } = getTransformedCoordinates(clientX, clientY);
+                const col = Math.floor(x / CELL_SIZE);
+                const row = Math.floor(y / CELL_SIZE);
+
+                if (row >= 0 && row < GRID_SIZE && col >= 0 && col < GRID_SIZE && solutionData.length > 0) {
+                    const oldValue = userData[row][col];
+                    const currentCoords = {r: row, c: col};
+                    let moveAllowed = true;
+                    
+                    const placementIndex = placementsThisRound.findIndex(p => p.r === row && p.c === col);
+                    const hintIndex = hintedCells.findIndex(p => p.r === row && p.c === col);
+
+                    // --- LOCK CHECK: Prevent removing correct (Green) squares ---
+                    if (lastCheckStatus[row][col] === 1 && oldValue === 1) {
+                        messageBox.classList.remove('bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-gray-200', 'border-green-200');
+                        messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
+                        messageBox.innerHTML = `🔒 **Locked:** This square is **correct (Green)** and cannot be removed!`;
+                        draw(true);
+                        return; // Block the action
+                    }
+                    // --- END LOCK CHECK ---
+
+
+                    // --- APPLY SELECTIVE MULTI-MOVE LIMIT RULE ---
+                    if (oldValue === 0) { // White to Black toggle (Placement/Guess)
+                        if (placementsThisRound.length < MAX_PLACEMENTS_PER_ROUND) {
+                            // Placement is allowed
+                            userData[row][col] = 1;
+                            currentBlackCount++;
+                            placementsThisRound.push(currentCoords); 
+                            if (hintIndex !== -1) hintedCells.splice(hintIndex, 1); // Remove hint circle if a placement is made on it
+                        } else {
+                            // Placement limit reached
+                            moveAllowed = false; 
+                        }
+                    } else { // Black to White toggle (Undo)
+                        userData[row][col] = 0;
+                        currentBlackCount--;
+                        
+                        // Check if this undoes a guess made THIS ROUND
+                        if (placementIndex !== -1) {
+                            placementsThisRound.splice(placementIndex, 1); 
+                        }
+                    }
+
+                    if (!moveAllowed) {
+                        // Show warning
+                        messageBox.classList.remove('bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-gray-200', 'border-green-200');
+                        messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
+                        messageBox.innerHTML = `🛑 **Placement limit reached!** You must undo one of your **${MAX_PLACEMENTS_PER_ROUND}** specific moves this round to place another.`;
+                        draw(true);
+                        return; 
+                    }
+                    
+                    // --- Handle Hint Click ---
+                    if (hintIndex !== -1 && moveAllowed && oldValue === 1) {
+                         // Clicking a hint circle that is already black (to turn it white/remove it) still removes the hint.
+                         hintedCells.splice(hintIndex, 1);
+                    }
+                    // --- END HINT CLICK HANDLING ---
+                    
+                    // Reset status feedback for this cell
+                    // IMPORTANT: Only clear if it wasn't a locked (Green) cell that was clicked
+                    if (lastCheckStatus[row][col] !== 1) {
+                        lastCheckStatus[row][col] = 0; 
+                    }
+                    
+                    // Any allowed move (placing or undoing) enables the check button
+                    isCellChanged = true;
+                    checkButton.disabled = false;
+                    checkButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                    checkButton.classList.add('hover:bg-indigo-700');
+                    
+                    draw(true);
+                    
+                    // Update placements remaining message
+                    if (solutionData.length > 0) {
+                        statusMessage.textContent = `Target generated. Grid Size: ${GRID_SIZE}x${GRID_SIZE}. Total black modules: ${totalSolutionBlack}. You have ${MAX_PLACEMENTS_PER_ROUND - placementsThisRound.length} placements remaining this round.`;
+                        statusMessage.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-200', 'text-yellow-900');
+                        statusMessage.classList.add('bg-blue-100', 'text-blue-800');
+                    }
+                }
+            }
+        }
+
+        function updateHintButtonUI() {
+            hintCounter.textContent = hintsRemaining;
+            
+            // Disable if 0 hints left OR if the puzzle is solved
+            const isDisabled = hintsRemaining <= 0 || isSolved || solutionData.length === 0;
+
+            hintButton.disabled = isDisabled;
+            
+            if (isDisabled) {
+                hintButton.classList.add('opacity-50', 'cursor-not-allowed');
+                hintButton.classList.remove('hover:bg-yellow-600');
+            } else {
+                hintButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                hintButton.classList.add('hover:bg-yellow-600');
+            }
+
+            // Update button color classes
+            hintButton.classList.remove('bg-yellow-500', 'bg-gray-400');
+            hintButton.classList.add(isDisabled ? 'bg-gray-400' : 'bg-yellow-500');
+            
+            // Update counter color classes
+            hintCounter.classList.remove('bg-red-500', 'bg-gray-400');
+            hintCounter.classList.add(isDisabled ? 'bg-gray-400' : 'bg-red-500');
+        }
+
+        function grantHint() {
+            if (hintsRemaining <= 0 || solutionData.length === 0 || isSolved) return;
+
+            hintsRemaining--;
+            updateHintButtonUI();
+
+            const potentialHints = [];
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    // Find cells that: 1. Should be black, 2. User hasn't guessed black, 3. Not currently hinted
+                    if (solutionData[r][c] === 1 && userData[r][c] === 0 && !hintedCells.some(p => p.r === r && p.c === c)) {
+                        potentialHints.push({ r, c });
+                    }
+                }
+            }
+
+            // Select up to 3 random unique hints
+            const hintsToSelect = Math.min(3, potentialHints.length);
+
+            for (let i = 0; i < hintsToSelect; i++) {
+                const randomIndex = Math.floor(Math.random() * potentialHints.length);
+                const hint = potentialHints.splice(randomIndex, 1)[0];
+                hintedCells.push(hint);
+            }
+            
+            draw(true);
+        }
+        
+        function handleCheatCodeChange(event) {
+            const code = event.target.value.toLowerCase();
+            if (code === 'admin') {
+                isCheating = true;
+                statusMessage.textContent = "⚠️ Admin Overlay Enabled. The correct pattern is shown in semi-transparent red.";
+                statusMessage.classList.remove('bg-blue-100', 'text-blue-800', 'bg-green-200', 'text-green-900', 'bg-red-100', 'text-red-800');
+                statusMessage.classList.add('bg-yellow-200', 'text-yellow-900');
+            } else if (code === 'done' && solutionData.length > 0) {
+                // If 'done' is typed, simulate a move and check
+                isCheating = false; 
+                isCellChanged = true;
+                checkPattern();
+                statusMessage.textContent = "✅ Auto-Solved via 'done' cheat!";
+                statusMessage.classList.remove('bg-blue-100', 'text-blue-800', 'bg-yellow-200', 'text-yellow-900', 'bg-red-100', 'text-red-800');
+                statusMessage.classList.add('bg-green-200', 'text-green-900');
+                event.target.value = ''; // Clear cheat input after use
+            } else {
+                isCheating = false;
+                if (solutionData.length > 0) {
+                    statusMessage.textContent = `Target generated. Grid Size: ${GRID_SIZE}x${GRID_SIZE}. Total black modules: ${totalSolutionBlack}. You have ${MAX_PLACEMENTS_PER_ROUND - placementsThisRound.length} placements remaining this round.`;
+                    statusMessage.classList.remove('bg-yellow-200', 'text-yellow-900', 'bg-green-200', 'text-green-900', 'bg-red-100', 'text-red-800');
+                    statusMessage.classList.add('bg-blue-100', 'text-blue-800');
+                }
+            }
+            draw(true);
+        }
+
+
+        function handleZoom(factor) {
+            scale *= factor;
+            scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+            draw(true);
+        }
+
+        function handleWheel(event) {
+            event.preventDefault();
+            const factor = event.deltaY < 0 ? 1.1 : 0.9;
+            handleZoom(factor);
+        }
+
+        function resetView() {
+            scale = 1.0;
+            panOffset = { x: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2, y: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2 };
+            draw(true);
+        }
+        
+        function wipeGrid() {
+            if (solutionData.length > 0) {
+                const previousGridSize = GRID_SIZE;
+                initializeGrid(previousGridSize); 
+                
+                // --- MESSAGE BOX PERSISTENCE ---
+                messageBox.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'border-red-200', 'border-green-200', 'border-yellow-200');
+                messageBox.classList.add('bg-gray-100', 'text-gray-700', 'border-gray-200');
+                messageBox.innerHTML = `
+                    <p><strong>Grid Wiped:</strong> Ready for a fresh start.</p>
+                    <p class="mt-2 text-xs text-gray-500">Make your ${MAX_PLACEMENTS_PER_ROUND} placements and press 'Check Pattern' for the first hint!</p>
+                `;
+                // --- END PERSISTENCE ---
+
+                draw(true);
+                statusMessage.textContent = `Grid wiped. Paint the ${GRID_SIZE}x${GRID_SIZE} pattern. Total black modules: ${totalSolutionBlack}. You have ${MAX_PLACEMENTS_PER_ROUND} placements remaining this round.`;
+                statusMessage.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-200', 'text-yellow-900');
+                statusMessage.classList.add('bg-blue-100', 'text-blue-800');
+                
+                // HIDE save button on wipe
+                saveButton.style.display = 'none';
+            } else {
+                 statusMessage.textContent = `Please generate a target pattern first!`;
+                 statusMessage.classList.remove('bg-blue-100', 'bg-green-100', 'text-blue-800', 'text-green-800', 'bg-yellow-200', 'text-yellow-900');
+                 statusMessage.classList.add('bg-red-100', 'text-red-800');
+            }
+        }
+
+        /**
+         * Main initialization function.
+         */
+        window.onload = function() {
+            canvas = document.getElementById('qrCanvas');
+            ctx = canvas.getContext('2d');
+            
+            // Interaction
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp); 
+            canvas.addEventListener('touchstart', handleMouseDown);
+            canvas.addEventListener('touchmove', handleMouseMove);
+            canvas.addEventListener('touchend', handleMouseUp);
+
+            // Zoom/View
+            canvas.addEventListener('wheel', handleWheel);
+            document.getElementById('zoomInButton').addEventListener('click', () => handleZoom(1.2));
+            document.getElementById('zoomOutButton').addEventListener('click', () => handleZoom(0.8));
+            document.getElementById('resetViewButton').addEventListener('click', resetView);
+            
+            // Game Flow
+            document.getElementById('generateButton').addEventListener('click', () => {
+                const url = document.getElementById('urlInput').value.trim();
+                if (url) {
+                    generateQrTarget(url);
+                } else {
+                    statusMessage.textContent = 'Please enter a URL or text before generating a target pattern.';
+                    statusMessage.classList.remove('bg-blue-100', 'bg-green-100', 'bg-yellow-200');
+                    statusMessage.classList.add('bg-red-100', 'text-red-800');
+                }
+            });
+            
+            checkButton.addEventListener('click', checkPattern);
+            document.getElementById('clearButton').addEventListener('click', wipeGrid);
+            
+            // Feature Listeners
+            document.getElementById('saveButton').addEventListener('click', saveSolutionQrCode);
+            cheatCodeInput.addEventListener('input', handleCheatCodeChange);
+            hintButton.addEventListener('click', grantHint);
+
+
+            initializeGrid(GRID_SIZE);
+            draw(true);
+            updateHintButtonUI();
+        };
+
+    </script>
+</body>
+</html>
