@@ -154,8 +154,8 @@
         A QR-dle puzzle by Idk. Hint color codes: Green=Correct/Locked, Red=Wrong/No match, Yellow/Orange/Dark Red=Proximity match (1-4 adjacent correct modules).
     </div>
 
-    <script>
-        // --- Core Configuration ---
+   <script>
+        // --- Core Configuration (UNCHANGED) ---
         let GRID_SIZE = 29; 
         const CANVAS_DIMENSION = 500; 
         const QR_IMAGE_SIZE = 400; 
@@ -163,15 +163,15 @@
         const BLACK_COUNT_BUFFER = 10; 
         const MAX_PLACEMENTS_PER_ROUND = 6; 
         const MAX_HINTS = 3; 
-        const EXPORT_SIZE = 500; // Resolution of the exported image
+        const EXPORT_SIZE = 500; 
 
-        // View/Interaction Constants
+        // View/Interaction Constants (UNCHANGED)
         const MIN_SCALE = 0.5;
         const MAX_SCALE = 5.0;
         const MOVEMENT_TOLERANCE = 5; 
-        const DRAG_DELAY_MS = 200; // 1/5 of a second delay
+        const DRAG_DELAY_MS = 200; 
 
-        // --- Global State ---
+        // --- Global State (UNCHANGED) ---
         let solutionData = []; 
         let totalSolutionBlack = 0; 
         let userData = []; 
@@ -192,9 +192,9 @@
         let isDragging = false;
         let lastMousePos = { x: 0, y: 0 };
         let startClickPos = { x: 0, y: 0 };
-        let dragTimer = null; // Timer for the drag-to-draw delay
-        let isDrawing = false; // New state for drag-to-draw mode
-        let lastDrawCell = {r: -1, c: -1}; // Prevent drawing the same cell multiple times during one drag move
+        let dragTimer = null; 
+        let isDrawing = false; 
+        let lastDrawCell = {r: -1, c: -1}; 
 
 
         const checkButton = document.getElementById('checkButton');
@@ -205,6 +205,131 @@
         const messageBox = document.getElementById('messageBox');
 
 
+        /* ... (The following functions are unchanged: initializeGrid, generateQrTarget, getAdjacentBlackCount, checkPattern, saveSolutionQrCode, draw, toggleCell, updateHintButtonUI, grantHint, handleZoom, handleWheel, resetView, wipeGrid) ... */
+        
+        // The following functions contain the core changes: handleMouseDown, handleMouseMove, handleMouseUp
+
+        function getTransformedCoordinates(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+
+            const translatedX = (x - panOffset.x) / scale;
+            const translatedY = (y - panOffset.y) / scale;
+
+            return { x: translatedX, y: translatedY };
+        }
+
+        function handleMouseDown(event) {
+            event.preventDefault(); 
+            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
+            const clientY = event.clientY || (event.touches ? event.touches[0].clientY : 0);
+            
+            isDragging = true;
+            isDrawing = false; // Start in panning mode
+            lastMousePos = { x: clientX, y: clientY };
+            startClickPos = { x: clientX, y: clientY };
+            lastDrawCell = {r: -1, c: -1};
+            
+            // Start the timer to switch to drawing mode
+            dragTimer = setTimeout(() => {
+                // Timer fired: We are now in drawing mode (no more panning)
+                isDrawing = true;
+                canvas.style.cursor = 'crosshair';
+
+                // We must process the initial click as a toggle now
+                const { x, y } = getTransformedCoordinates(clientX, clientY);
+                const col = Math.floor(x / CELL_SIZE);
+                const row = Math.floor(y / CELL_SIZE);
+                if (row >= 0 && row < GRID_SIZE && col >= 0 && col < GRID_SIZE && solutionData.length > 0) {
+                     toggleCell(row, col);
+                     lastDrawCell = {r: row, c: col};
+                }
+            }, DRAG_DELAY_MS);
+            
+            canvas.style.cursor = 'grab';
+        }
+
+        function handleMouseMove(event) {
+            if (!isDragging) return;
+            event.preventDefault();
+
+            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
+            const clientY = event.clientY || (event.touches ? event.touches[0].clientY : 0);
+
+            const dx = clientX - lastMousePos.x;
+            const dy = clientY - lastMousePos.y;
+            
+            lastMousePos = { x: clientX, y: clientY };
+            
+            // --- DRAWING MODE (Priority 1) ---
+            if (isDrawing) {
+                // If we are drawing, we only draw, we NEVER pan.
+                const { x, y } = getTransformedCoordinates(clientX, clientY);
+                const col = Math.floor(x / CELL_SIZE);
+                const row = Math.floor(y / CELL_SIZE);
+
+                if (row !== lastDrawCell.r || col !== lastDrawCell.c) {
+                    toggleCell(row, col);
+                    lastDrawCell = {r: row, c: col};
+                }
+                return; // Stop here, no more processing.
+            }
+            
+            // --- PANNING MODE CHECK (Priority 2) ---
+            
+            // If the cursor moves significantly before the delay, clear the timer and stay in pan mode
+            const totalDx = clientX - startClickPos.x;
+            const totalDy = clientY - startClickPos.y;
+            
+            if (Math.sqrt(totalDx * totalDx + totalDy * totalDy) > MOVEMENT_TOLERANCE) {
+                if (dragTimer) {
+                    clearTimeout(dragTimer);
+                    dragTimer = null;
+                }
+                // Panning mode activated/confirmed.
+                panOffset.x += dx;
+                panOffset.y += dy;
+                draw(true);
+            }
+            // If movement is minimal, do nothing (waiting for timer or click release)
+        }
+
+        function handleMouseUp(event) {
+            if (!isDragging) return;
+            
+            const clientX = event.clientX || (event.changedTouches ? event.changedTouches[0].clientX : 0);
+            const clientY = event.clientY || (event.changedTouches ? event.changedTouches[0].clientY : 0);
+
+            const dx = clientX - startClickPos.x;
+            const dy = clientY - startClickPos.y;
+            
+            isDragging = false;
+            canvas.style.cursor = 'grab';
+
+            // Clear the timer if it hasn't fired yet
+            if (dragTimer) {
+                clearTimeout(dragTimer);
+                dragTimer = null;
+            }
+
+            // If it was a "click" (minimal movement AND timer didn't trigger drawing mode)
+            if (!isDrawing && Math.sqrt(dx * dx + dy * dy) < MOVEMENT_TOLERANCE) {
+                const { x, y } = getTransformedCoordinates(clientX, clientY);
+                const col = Math.floor(x / CELL_SIZE);
+                const row = Math.floor(y / CELL_SIZE);
+
+                if (row >= 0 && row < GRID_SIZE && col >= 0 && col < GRID_SIZE && solutionData.length > 0) {
+                    // This is the single click toggle action
+                    toggleCell(row, col);
+                }
+            }
+            
+            isDrawing = false; // Exit drawing mode
+        }
+        
+        /* ... (The rest of the functions are unchanged and included below for completeness) ... */
+        
         /**
          * Initializes the 2D array data structures and resets the game state.
          * @param {number} size - The new dimension of the square grid.
@@ -670,119 +795,6 @@
             statusMessage.classList.add('bg-blue-100', 'text-blue-800');
             
             return true;
-        }
-
-        // --- Interaction Handlers (Pan/Click/Drag) ---
-        
-        function getTransformedCoordinates(clientX, clientY) {
-            const rect = canvas.getBoundingClientRect();
-            const x = clientX - rect.left;
-            const y = clientY - rect.top;
-
-            const translatedX = (x - panOffset.x) / scale;
-            const translatedY = (y - panOffset.y) / scale;
-
-            return { x: translatedX, y: translatedY };
-        }
-
-        function handleMouseDown(event) {
-            event.preventDefault(); 
-            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
-            const clientY = event.clientY || (event.touches ? event.touches[0].clientY : 0);
-            
-            isDragging = true;
-            isDrawing = false; // Start in panning mode
-            lastMousePos = { x: clientX, y: clientY };
-            startClickPos = { x: clientX, y: clientY };
-            lastDrawCell = {r: -1, c: -1};
-            
-            // Start the timer to switch to drawing mode
-            dragTimer = setTimeout(() => {
-                isDrawing = true;
-                canvas.style.cursor = 'crosshair';
-                // Trigger an initial toggle if in drawing mode and not dragging too far
-                const { x, y } = getTransformedCoordinates(clientX, clientY);
-                const col = Math.floor(x / CELL_SIZE);
-                const row = Math.floor(y / CELL_SIZE);
-                if (row >= 0 && row < GRID_SIZE && col >= 0 && col < GRID_SIZE && solutionData.length > 0) {
-                     toggleCell(row, col);
-                     lastDrawCell = {r: row, c: col};
-                }
-            }, DRAG_DELAY_MS);
-            
-            canvas.style.cursor = 'grabbing';
-        }
-
-        function handleMouseMove(event) {
-            if (!isDragging) return;
-            event.preventDefault();
-
-            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
-            const clientY = event.clientY || (event.touches ? event.touches[0].clientY : 0);
-
-            const dx = clientX - lastMousePos.x;
-            const dy = clientY - lastMousePos.y;
-            
-            lastMousePos = { x: clientX, y: clientY };
-            
-            // If the cursor moves significantly before the delay, clear the timer and stay in pan mode
-            const totalDx = clientX - startClickPos.x;
-            const totalDy = clientY - startClickPos.y;
-            if (Math.sqrt(totalDx * totalDx + totalDy * totalDy) > MOVEMENT_TOLERANCE && dragTimer) {
-                clearTimeout(dragTimer);
-                dragTimer = null;
-                isDrawing = false;
-                canvas.style.cursor = 'grabbing';
-            }
-            
-            if (!isDrawing) {
-                // Panning mode
-                panOffset.x += dx;
-                panOffset.y += dy;
-                draw(true);
-            } else {
-                // Drag-to-Draw mode
-                const { x, y } = getTransformedCoordinates(clientX, clientY);
-                const col = Math.floor(x / CELL_SIZE);
-                const row = Math.floor(y / CELL_SIZE);
-
-                if (row !== lastDrawCell.r || col !== lastDrawCell.c) {
-                    toggleCell(row, col);
-                    lastDrawCell = {r: row, c: col};
-                }
-            }
-        }
-
-        function handleMouseUp(event) {
-            if (!isDragging) return;
-            
-            const clientX = event.clientX || (event.changedTouches ? event.changedTouches[0].clientX : 0);
-            const clientY = event.clientY || (event.changedTouches ? event.changedTouches[0].clientY : 0);
-
-            const dx = clientX - startClickPos.x;
-            const dy = clientY - startClickPos.y;
-            
-            isDragging = false;
-            canvas.style.cursor = 'grab';
-
-            // Clear the timer if it hasn't fired yet
-            if (dragTimer) {
-                clearTimeout(dragTimer);
-                dragTimer = null;
-            }
-
-            // If it was a "click" (minimal movement AND timer didn't trigger drawing mode)
-            if (!isDrawing && Math.sqrt(dx * dx + dy * dy) < MOVEMENT_TOLERANCE) {
-                const { x, y } = getTransformedCoordinates(clientX, clientY);
-                const col = Math.floor(x / CELL_SIZE);
-                const row = Math.floor(y / CELL_SIZE);
-
-                if (row >= 0 && row < GRID_SIZE && col >= 0 && col < GRID_SIZE && solutionData.length > 0) {
-                    toggleCell(row, col);
-                }
-            }
-            
-            isDrawing = false; // Exit drawing mode
         }
 
         function updateHintButtonUI() {
