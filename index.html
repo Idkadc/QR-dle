@@ -20,6 +20,7 @@
             user-select: none;
             touch-action: none;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.15), inset 0 2px 8px rgba(0, 0, 0, 0.1);
+            aspect-ratio: 1 / 1; /* Keep the container square */
         }
         
         /* Custom style for the hint counter bubble */
@@ -70,20 +71,36 @@
     <header class="w-full bg-gray-800 text-white shadow-lg sticky top-0 z-10">
         <div class="max-w-xl mx-auto p-4 flex justify-between items-center">
              <h1 class="text-xl font-bold">QR-dle 🧩</h1>
-             <span class="text-sm font-light text-gray-400">Guess the QR Code!</span>
+             <span class="text-sm font-light text-gray-400">Guess the Code!</span>
         </div>
     </header>
 
     <div class="w-full max-w-xl bg-white shadow-2xl rounded-xl p-6 md:p-8 space-y-6 mt-4">
         <h2 class="text-3xl font-extrabold text-gray-900 text-center">
-             The QR Puzzle ◼️
+             The Code Puzzle ◼️
         </h2>
         <p class="text-center text-gray-600 text-sm md:text-base border-b pb-4 border-gray-200">
-             <span class="font-bold text-red-600">Rule:</span> You get **6 guesses per check** to paint a white module black. Undoing one of those 6 guesses returns that slot. **Green squares are locked.**
+             <span class="font-bold text-red-600">Rule:</span> You get **<span id="placementLimit">6</span> placements per check** to toggle a square. Undoing a guess returns the slot. **Green squares are locked.**
         </p>
 
         <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
-            <input type="url" id="urlInput" value="https://www.google.com" placeholder="Enter URL or Text"
+            <!-- Mode Selector -->
+            <select id="modeSelect" 
+                    class="p-3 border border-gray-300 rounded-lg shadow-inner bg-white flex-shrink-0 w-full sm:w-auto focus:ring-indigo-500 focus:border-indigo-500 transition">
+                <option value="QR">QR Code Puzzle (Square)</option>
+                <option value="rMQR">rMQR Puzzle (Rectangular)</option>
+                <option value="BARCODE">Barcode Puzzle (Code 39)</option>
+            </select>
+
+            <!-- Version Selector (Dynamic Visibility/Content) -->
+            <select id="versionSelect" 
+                    class="p-3 border border-gray-300 rounded-lg shadow-inner bg-white flex-shrink-0 w-full sm:w-auto focus:ring-indigo-500 focus:border-indigo-500 transition">
+                <!-- Options populated by JavaScript -->
+            </select>
+        </div>
+
+        <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+            <input type="url" id="urlInput" value="QRDLE" placeholder="Enter URL or Text"
                     class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500 shadow-inner transition">
             <button id="generateButton"
                     class="action-button-base px-4 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-50">
@@ -95,12 +112,12 @@
             <button id="saveButton" 
                     style="display: none;"
                     class="action-button-base w-full md:w-auto px-6 py-2 bg-purple-600 text-white font-semibold rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-4 focus:ring-purple-500">
-                 💾 Save QR Code (Perfect Victory)
+                 💾 Save Solution
             </button>
         </div>
 
         <div id="statusMessage" class="text-center p-3 text-sm rounded-lg font-medium bg-blue-100 text-blue-800 transition border border-blue-300">
-             Enter a URL or text and click "Generate Target" to begin the puzzle.
+             Enter content and click "Generate Target" to begin the puzzle.
         </div>
 
         <hr class="border-gray-300">
@@ -137,6 +154,16 @@
             </button>
         </div>
         
+        <!-- HISTORY BUTTON -->
+        <div class="flex justify-center mt-3">
+            <button id="checkedSquaresButton"
+                    class="action-button-base w-full px-8 py-3 bg-fuchsia-600 text-white font-semibold rounded-lg 
+                           hover:bg-fuchsia-700 focus:outline-none focus:ring-4 focus:ring-fuchsia-500 disabled:opacity-50 transition duration-150">
+                <span class="text-sm md:text-base">Show Click History (One-Time)</span>
+                <span class="block text-xs font-light mt-1 opacity-70">(Reveals all checked squares)</span>
+            </button>
+        </div>
+
         <div id="messageBox" class="text-center p-4 mt-4 text-sm rounded-lg font-bold bg-gray-100 text-gray-700 border-2 border-gray-200 shadow-inner">
              <p>Ready to generate a pattern!</p>
              <p class="mt-2 text-xs text-gray-500">The detailed score breakdown and missing quadrant hint will appear here after your first check.</p>
@@ -151,27 +178,143 @@
     </div>
     
     <div class="p-4 text-center text-xs text-gray-500 mt-4 max-w-xl">
-        A QR-dle puzzle by Idk. Hint color codes: Green=Correct/Locked, Red=Wrong/No match, Yellow/Orange/Dark Red=Proximity match (1-4 adjacent correct modules).
+        Hint color codes: Green=Correct/Locked, Red=Wrong/No match, Yellow/Orange/Dark Red=Proximity match (1-4 adjacent correct modules). **Purple circles show click history.**
     </div>
 
-   <script>
-        // --- Core Configuration (UNCHANGED) ---
-        let GRID_SIZE = 29; 
+    <script>
+        // --- Core Configuration ---
         const CANVAS_DIMENSION = 500; 
-        const QR_IMAGE_SIZE = 400; 
-        let CELL_SIZE = QR_IMAGE_SIZE / GRID_SIZE;
-        const BLACK_COUNT_BUFFER = 10; 
-        const MAX_PLACEMENTS_PER_ROUND = 6; 
+        const MAX_DRAWING_AREA = 400; 
+        const BLACK_COUNT_BUFFER = 100; // UPDATED: Max allowed black squares is 100 more than solution total
+        let MAX_PLACEMENTS_PER_ROUND = 6; 
         const MAX_HINTS = 3; 
         const EXPORT_SIZE = 500; 
-
-        // View/Interaction Constants (UNCHANGED)
+        
+        // View/Interaction Constants
         const MIN_SCALE = 0.5;
-        const MAX_SCALE = 5.0;
+        const MAX_SCALE = 5.0; 
+        const BARCODE_MAX_SCALE = 15.0; // UPDATED: Increased max zoom for Barcode mode
         const MOVEMENT_TOLERANCE = 5; 
         const DRAG_DELAY_MS = 200; 
 
-        // --- Global State (UNCHANGED) ---
+
+        // Placement Limits by QR Version/Mode
+        const MAX_PLACEMENTS_LOOKUP = {
+            '1': 6,  
+            '5': 10, 
+            '10': 15, 
+            '20': 20, 
+            'BARCODE': 8, // UPDATED
+            'RM2': 4,  // UPDATED
+            'RM3': 6, // UPDATED
+            'RM4': 9, // UPDATED
+            'DEFAULT': 6
+        };
+
+        // Dimensions for rMQR puzzles (Height x Width)
+        const RMQR_DIMENSIONS = {
+            'RM2': { h: 9, w: 15 },
+            'RM3': { h: 11, w: 27 },
+            'RM4': { h: 13, w: 35 }
+        };
+
+        // --- SELECT OPTION DEFINITIONS ---
+        const QR_OPTIONS = [
+            { value: '1', text: 'Version 1 (21x21 | 6 Placements)' },
+            { value: '5', text: 'Version 5 (37x37 | 10 Placements)' },
+            { value: '10', text: 'Version 10 (57x57 | 15 Placements)' },
+            { value: '20', text: 'Version 20 (99x99 | 20 Placements)' },
+        ];
+        const RMQR_OPTIONS = [
+            { value: 'RM2', text: 'RM2 (9x15 | 4 Placements)' },
+            { value: 'RM3', text: 'RM3 (11x27 | 6 Placements)' },
+            { value: 'RM4', text: 'RM4 (13x35 | 9 Placements)' },
+        ];
+        const BARCODE_OPTIONS = [
+             { value: 'BARCODE', text: 'Code 39 (Dynamic W x 10 | 8 Placements)' },
+        ];
+        
+        // --- Code 39 Encoding Utility ---
+        const Code39 = {
+            // N=Narrow (1 module), W=Wide (3 modules)
+            // Pattern order: Bar1, Space1, Bar2, Space2, Bar3, Space3, Bar4, Space4, Bar5
+            // 0 = Narrow, 1 = Wide
+            ENCODING: {
+                '0': [0,0,0,1,1,0,1,0,0], '1': [1,0,0,1,0,0,0,0,1], '2': [0,0,1,1,0,0,0,0,1],
+                '3': [1,0,1,1,0,0,0,0,0], '4': [0,0,0,1,1,0,0,0,1], '5': [1,0,0,1,1,0,0,0,0],
+                '6': [0,0,1,1,1,0,0,0,0], '7': [0,0,0,1,0,0,1,0,1], '8': [1,0,0,1,0,0,1,0,0],
+                '9': [0,0,1,1,0,0,1,0,0], 'A': [1,0,0,0,0,1,0,0,1], 'B': [0,0,1,0,0,1,0,0,1],
+                'C': [1,0,1,0,0,1,0,0,0], 'D': [0,0,0,0,1,1,0,0,1], 'E': [1,0,0,0,1,1,0,0,0],
+                'F': [0,0,1,0,1,1,0,0,0], 'G': [0,0,0,0,0,1,1,0,1], 'H': [1,0,0,0,0,1,1,0,0],
+                'I': [0,0,1,0,0,1,1,0,0], 'J': [0,0,0,0,1,1,1,0,0], 'K': [1,0,0,0,0,0,0,1,1],
+                'L': [0,0,1,0,0,0,0,1,1], 'M': [1,0,1,0,0,0,0,1,0], 'N': [0,0,0,0,1,0,0,1,1],
+                'O': [1,0,0,0,1,0,0,1,0], 'P': [0,0,1,0,1,0,0,1,0], 'Q': [0,0,0,0,0,0,1,1,1],
+                'R': [1,0,0,0,0,0,1,1,0], 'S': [0,0,1,0,0,0,1,1,0], 'T': [0,0,0,0,1,0,1,1,0],
+                'U': [1,1,0,0,0,0,0,0,1], 'V': [0,1,1,0,0,0,0,0,1], 'W': [1,1,1,0,0,0,0,0,0],
+                'X': [0,1,0,0,1,0,0,0,1], 'Y': [1,1,0,0,1,0,0,0,0], 'Z': [0,1,1,0,1,0,0,0,0],
+                '-': [0,1,0,0,0,0,1,0,1], '.': [1,1,0,0,0,0,1,0,0], ' ': [0,1,1,0,0,0,1,0,0],
+                '$': [0,1,0,1,0,1,0,0,0], '/': [0,1,0,1,0,0,0,1,0], '+': [0,1,0,0,0,1,0,1,0],
+                '%': [0,0,0,1,0,1,0,1,0], '*': [0,1,0,0,1,0,1,0,0] // Start/Stop
+            },
+            // Generates the final module pattern (1=Black Bar, 0=White Space)
+            encode: function(data) {
+                // Ensure data is uppercase and includes only valid characters
+                const upperData = data.toUpperCase().replace(/[^0-9A-Z\-\.\$\/\+\%\s]/g, '');
+                
+                // Add start and stop character
+                const fullData = '*' + upperData + '*';
+                
+                let modulePattern = [];
+                const narrowWidth = 1;
+                const wideWidth = 3;
+                const interCharGap = 1; // 1 narrow module space between characters
+
+                for (let i = 0; i < fullData.length; i++) {
+                    const char = fullData[i];
+                    const pattern = this.ENCODING[char];
+
+                    if (!pattern) continue; // Should not happen with cleaning above
+
+                    // Process 5 bars and 4 spaces (9 elements total)
+                    for (let j = 0; j < 9; j++) {
+                        const isWide = pattern[j] === 1;
+                        const width = isWide ? wideWidth : narrowWidth;
+                        const isBar = j % 2 === 0;
+
+                        // Add modules to the pattern
+                        for (let k = 0; k < width; k++) {
+                            modulePattern.push(isBar ? 1 : 0);
+                        }
+                    }
+
+                    // Add inter-character gap (unless it's the last character)
+                    if (i < fullData.length - 1) {
+                        for (let k = 0; k < interCharGap; k++) {
+                            modulePattern.push(0); // White space
+                        }
+                    }
+                }
+                return modulePattern;
+            },
+            getRequiredWidth: function(data) {
+                // Calculates total modules based on the encoded data length
+                const charCount = data.toUpperCase().replace(/[^0-9A-Z\-\.\$\/\+\%\s]/g, '').length + 2;
+                // Total modules per char segment (including trailing gap) = 16
+                // Subtract 1 module because the last inter-char gap is not added after the stop character.
+                return (charCount * 16) - 1; 
+            },
+            getMaxLength: function() {
+                // Maximum comfortable length for the canvas to display clearly
+                return 30; 
+            }
+        };
+
+        // --- Global State Variables ---
+        let GRID_WIDTH = 0;
+        let GRID_HEIGHT = 0;
+        let moduleWidth = 0;
+        let moduleHeight = 0; 
+        
         let solutionData = []; 
         let totalSolutionBlack = 0; 
         let userData = []; 
@@ -183,18 +326,25 @@
         let isSolved = false; 
         
         let lastCheckStatus = []; 
+        let puzzleMode = 'QR';
         
-        let canvas, ctx;
+        let allClickHistory = []; 
+        let pendingClickHistory = []; 
+        let isHistoryVisible = false; 
+        let isHistoryUsed = false; 
         
-        // Panning/Zooming State
+        let previousDistance = null; 
+        
         let scale = 1.0;
-        let panOffset = { x: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2, y: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2 };
+        let panOffset = { x: 0, y: 0 }; 
         let isDragging = false;
+        let isTouchDragging = false; 
+        let isDrawing = false; 
         let lastMousePos = { x: 0, y: 0 };
         let startClickPos = { x: 0, y: 0 };
         let dragTimer = null; 
-        let isDrawing = false; 
         let lastDrawCell = {r: -1, c: -1}; 
+        let canvas, ctx;
 
 
         const checkButton = document.getElementById('checkButton');
@@ -203,179 +353,285 @@
         const saveButton = document.getElementById('saveButton'); 
         const statusMessage = document.getElementById('statusMessage');
         const messageBox = document.getElementById('messageBox');
+        const checkedSquaresButton = document.getElementById('checkedSquaresButton');
+        const modeSelect = document.getElementById('modeSelect');
+        const versionSelect = document.getElementById('versionSelect');
+        const placementLimitSpan = document.getElementById('placementLimit');
 
-
-        /* ... (The following functions are unchanged: initializeGrid, generateQrTarget, getAdjacentBlackCount, checkPattern, saveSolutionQrCode, draw, toggleCell, updateHintButtonUI, grantHint, handleZoom, handleWheel, resetView, wipeGrid) ... */
-        
-        // The following functions contain the core changes: handleMouseDown, handleMouseMove, handleMouseUp
-
-        function getTransformedCoordinates(clientX, clientY) {
-            const rect = canvas.getBoundingClientRect();
-            const x = clientX - rect.left;
-            const y = clientY - rect.top;
-
-            const translatedX = (x - panOffset.x) / scale;
-            const translatedY = (y - panOffset.y) / scale;
-
-            return { x: translatedX, y: translatedY };
+        // --- Core UI Update Logic ---
+        function updatePlacementLimitUI() {
+            placementLimitSpan.textContent = MAX_PLACEMENTS_PER_ROUND;
         }
 
-        function handleMouseDown(event) {
-            event.preventDefault(); 
-            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
-            const clientY = event.clientY || (event.touches ? event.touches[0].clientY : 0);
+        function updateHintButtonUI() {
+            hintCounter.textContent = hintsRemaining;
             
-            isDragging = true;
-            isDrawing = false; // Start in panning mode
-            lastMousePos = { x: clientX, y: clientY };
-            startClickPos = { x: clientX, y: clientY };
-            lastDrawCell = {r: -1, c: -1};
-            
-            // Start the timer to switch to drawing mode
-            dragTimer = setTimeout(() => {
-                // Timer fired: We are now in drawing mode (no more panning)
-                isDrawing = true;
-                canvas.style.cursor = 'crosshair';
+            const isDisabled = hintsRemaining <= 0 || isSolved || solutionData.length === 0;
 
-                // We must process the initial click as a toggle now
-                const { x, y } = getTransformedCoordinates(clientX, clientY);
-                const col = Math.floor(x / CELL_SIZE);
-                const row = Math.floor(y / CELL_SIZE);
-                if (row >= 0 && row < GRID_SIZE && col >= 0 && col < GRID_SIZE && solutionData.length > 0) {
-                     toggleCell(row, col);
-                     lastDrawCell = {r: row, c: col};
-                }
-            }, DRAG_DELAY_MS);
+            hintButton.disabled = isDisabled;
             
-            canvas.style.cursor = 'grab';
+            if (isDisabled) {
+                hintButton.classList.add('opacity-50', 'cursor-not-allowed');
+                hintButton.classList.remove('hover:bg-yellow-600');
+            } else {
+                hintButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                hintButton.classList.add('hover:bg-yellow-600');
+            }
+
+            hintButton.classList.remove('bg-yellow-500', 'bg-gray-400');
+            hintButton.classList.add(isDisabled ? 'bg-gray-400' : 'bg-yellow-500');
+            
+            hintCounter.classList.remove('bg-red-500', 'bg-gray-400');
+            hintCounter.classList.add(isDisabled ? 'bg-gray-400' : 'bg-red-500');
         }
 
-        function handleMouseMove(event) {
-            if (!isDragging) return;
-            event.preventDefault();
+        function updateCheckedSquaresButtonUI() {
+            const shouldBeDisabled = solutionData.length === 0 || isHistoryUsed; 
 
-            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
-            const clientY = event.clientY || (event.touches ? event.touches[0].clientY : 0);
-
-            const dx = clientX - lastMousePos.x;
-            const dy = clientY - lastMousePos.y;
-            
-            lastMousePos = { x: clientX, y: clientY };
-            
-            // --- DRAWING MODE (Priority 1) ---
-            if (isDrawing) {
-                // If we are drawing, we only draw, we NEVER pan.
-                const { x, y } = getTransformedCoordinates(clientX, clientY);
-                const col = Math.floor(x / CELL_SIZE);
-                const row = Math.floor(y / CELL_SIZE);
-
-                if (row !== lastDrawCell.r || col !== lastDrawCell.c) {
-                    toggleCell(row, col);
-                    lastDrawCell = {r: row, c: col};
-                }
-                return; // Stop here, no more processing.
+            checkedSquaresButton.disabled = shouldBeDisabled;
+            if (shouldBeDisabled) {
+                 checkedSquaresButton.classList.add('opacity-50');
+                 checkedSquaresButton.classList.remove('hover:bg-fuchsia-700');
+            } else {
+                 checkedSquaresButton.classList.remove('opacity-50');
+                 checkedSquaresButton.classList.add('hover:bg-fuchsia-700');
             }
-            
-            // --- PANNING MODE CHECK (Priority 2) ---
-            
-            // If the cursor moves significantly before the delay, clear the timer and stay in pan mode
-            const totalDx = clientX - startClickPos.x;
-            const totalDy = clientY - startClickPos.y;
-            
-            if (Math.sqrt(totalDx * totalDx + totalDy * totalDy) > MOVEMENT_TOLERANCE) {
-                if (dragTimer) {
-                    clearTimeout(dragTimer);
-                    dragTimer = null;
-                }
-                // Panning mode activated/confirmed.
-                panOffset.x += dx;
-                panOffset.y += dy;
-                draw(true);
-            }
-            // If movement is minimal, do nothing (waiting for timer or click release)
-        }
-
-        function handleMouseUp(event) {
-            if (!isDragging) return;
-            
-            const clientX = event.clientX || (event.changedTouches ? event.changedTouches[0].clientX : 0);
-            const clientY = event.clientY || (event.changedTouches ? event.changedTouches[0].clientY : 0);
-
-            const dx = clientX - startClickPos.x;
-            const dy = clientY - startClickPos.y;
-            
-            isDragging = false;
-            canvas.style.cursor = 'grab';
-
-            // Clear the timer if it hasn't fired yet
-            if (dragTimer) {
-                clearTimeout(dragTimer);
-                dragTimer = null;
-            }
-
-            // If it was a "click" (minimal movement AND timer didn't trigger drawing mode)
-            if (!isDrawing && Math.sqrt(dx * dx + dy * dy) < MOVEMENT_TOLERANCE) {
-                const { x, y } = getTransformedCoordinates(clientX, clientY);
-                const col = Math.floor(x / CELL_SIZE);
-                const row = Math.floor(y / CELL_SIZE);
-
-                if (row >= 0 && row < GRID_SIZE && col >= 0 && col < GRID_SIZE && solutionData.length > 0) {
-                    // This is the single click toggle action
-                    toggleCell(row, col);
-                }
-            }
-            
-            isDrawing = false; // Exit drawing mode
         }
         
-        /* ... (The rest of the functions are unchanged and included below for completeness) ... */
-        
-        /**
-         * Initializes the 2D array data structures and resets the game state.
-         * @param {number} size - The new dimension of the square grid.
-         */
-        function initializeGrid(size) {
-            GRID_SIZE = size;
-            CELL_SIZE = QR_IMAGE_SIZE / GRID_SIZE;
+        function updateVersionSelectorVisibility() {
+            const mode = modeSelect.value;
+            versionSelect.innerHTML = ''; 
             
-            userData = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
-            lastCheckStatus = Array(GRID_SIZE).fill(0).map(() => Array(GRID_SIZE).fill(0));
+            let options = [];
+            
+            if (mode === 'QR') {
+                options = QR_OPTIONS;
+            } else if (mode === 'rMQR') {
+                options = RMQR_OPTIONS;
+            } else if (mode === 'BARCODE') {
+                options = BARCODE_OPTIONS;
+            }
+
+            options.forEach(opt => {
+                const optionElement = document.createElement('option');
+                optionElement.value = opt.value;
+                optionElement.textContent = opt.text;
+                versionSelect.appendChild(optionElement);
+            });
+
+            // Set dynamic max placements immediately after updating options
+            const selectedVersion = versionSelect.value || (mode === 'QR' ? '1' : (mode === 'rMQR' ? 'RM2' : 'BARCODE'));
+            MAX_PLACEMENTS_PER_ROUND = MAX_PLACEMENTS_LOOKUP[selectedVersion] || MAX_PLACEMENTS_LOOKUP.DEFAULT;
+            updatePlacementLimitUI();
+            
+            // Adjust max zoom based on mode
+            const currentMaxScale = (mode === 'BARCODE' ? BARCODE_MAX_SCALE : MAX_SCALE);
+            // Re-run resetView to apply new initial zoom and center offset
+            if (GRID_WIDTH > 0) resetView();
+        }
+        
+        function grantHint() {
+            if (hintsRemaining <= 0 || solutionData.length === 0 || isSolved) return;
+
+            hintsRemaining--;
+            updateHintButtonUI();
+
+            const potentialHints = [];
+            for (let r = 0; r < GRID_HEIGHT; r++) {
+                for (let c = 0; c < GRID_WIDTH; c++) {
+                    // Only hint cells that should be black but are currently white/unsolved
+                    if (solutionData[r][c] === 1 && userData[r][c] === 0 && !hintedCells.some(p => p.r === r && p.c === c)) {
+                        potentialHints.push({ r, c });
+                    }
+                }
+            }
+
+            const hintsToSelect = Math.min(3, potentialHints.length);
+
+            for (let i = 0; i < hintsToSelect; i++) {
+                const randomIndex = Math.floor(Math.random() * potentialHints.length);
+                const hint = potentialHints.splice(randomIndex, 1)[0];
+                
+                if (puzzleMode === 'BARCODE') {
+                    // For Barcode, hint the entire column
+                    for (let r = 0; r < GRID_HEIGHT; r++) {
+                         // Only add once per column
+                         if (r === 0 && !hintedCells.some(p => p.c === hint.c)) {
+                            // Store r=-1 as a marker for a full column hint
+                            hintedCells.push({ r: -1, c: hint.c }); 
+                         }
+                    }
+                } else {
+                    // For QR/rMQR, hint the single cell
+                    hintedCells.push(hint);
+                }
+            }
+            
+            draw(true);
+        }
+
+        // --- Grid Initialization & Generation ---
+
+        function getDistance(touches) {
+            if (touches.length < 2) return 0;
+            const dx = touches[0].clientX - touches[1].clientX;
+            const dy = touches[0].clientY - touches[1].clientY;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function initializeGrid(width, height) {
+            GRID_WIDTH = width;
+            GRID_HEIGHT = height;
+            
+            const ratio = GRID_WIDTH / GRID_HEIGHT;
+            let drawWidth, drawHeight;
+
+            if (ratio > 1) { 
+                drawWidth = MAX_DRAWING_AREA;
+                drawHeight = MAX_DRAWING_AREA / ratio;
+            } else { 
+                drawHeight = MAX_DRAWING_AREA;
+                drawWidth = MAX_DRAWING_AREA * ratio;
+            }
+
+            moduleWidth = drawWidth / GRID_WIDTH;
+            moduleHeight = drawHeight / GRID_HEIGHT;
+
+            panOffset = { 
+                x: (CANVAS_DIMENSION - drawWidth) / 2, 
+                y: (CANVAS_DIMENSION - drawHeight) / 2 
+            };
+            scale = 1.0;
+
+            userData = Array(GRID_HEIGHT).fill(0).map(() => Array(GRID_WIDTH).fill(0));
+            lastCheckStatus = Array(GRID_HEIGHT).fill(0).map(() => Array(GRID_WIDTH).fill(0));
+            solutionData = Array(GRID_HEIGHT).fill(0).map(() => Array(GRID_WIDTH).fill(0));
             
             isCellChanged = false;
             currentBlackCount = 0;
             placementsThisRound = []; 
-            
             hintsRemaining = MAX_HINTS; 
-            hintedCells = []; 
             isSolved = false; 
+            hintedCells = []; 
+            
+            allClickHistory = [];
+            pendingClickHistory = []; 
+            isHistoryVisible = false;
+            isHistoryUsed = false; 
+
             updateHintButtonUI();
+            updateCheckedSquaresButtonUI();
+            updatePlacementLimitUI();
 
             checkButton.disabled = true;
             checkButton.classList.add('opacity-50', 'cursor-not-allowed');
             checkButton.classList.remove('hover:bg-indigo-700');
-            
-            // HIDE save button at start
             saveButton.style.display = 'none';
-            
-            // Reset view
-            panOffset = { x: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2, y: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2 };
-            scale = 1.0;
         }
 
         /**
-         * Generates the QR code data for the input URL/text and sets up the game.
+         * Generates a Code 39 Barcode pattern.
          */
-        function generateQrTarget(text) {
+        function generateBarcodeTarget(text) {
+            // Validate input for Code 39
+            const cleanedText = text.toUpperCase().replace(/[^0-9A-Z\-\.\$\/\+\%\s]/g, '');
+            const maxLength = Code39.getMaxLength();
+
+            if (!text || cleanedText.length === 0) {
+                 statusMessage.textContent = `Please enter valid characters (0-9, A-Z, -.$/+) for the Code 39 Barcode.`;
+                 statusMessage.classList.remove('bg-blue-100');
+                 statusMessage.classList.add('bg-red-100', 'text-red-800');
+                 initializeGrid(60, 10); 
+                 return;
+            }
+            if (cleanedText.length > maxLength) {
+                 statusMessage.textContent = `Error: Barcode content too long (${cleanedText.length} > ${maxLength} chars). Max recommended length is ${maxLength}. Please shorten input.`;
+                 statusMessage.classList.remove('bg-blue-100');
+                 statusMessage.classList.add('bg-red-100', 'text-red-800');
+                 initializeGrid(Code39.getRequiredWidth(cleanedText), 10); 
+                 return;
+            }
+
+            const pattern = Code39.encode(cleanedText);
+            const totalModules = pattern.length;
+
+            const BARCODE_HEIGHT = 10;
+            
+            initializeGrid(totalModules, BARCODE_HEIGHT); 
+
+            totalSolutionBlack = 0;
+            for (let r = 0; r < GRID_HEIGHT; r++) {
+                for (let c = 0; c < GRID_WIDTH; c++) {
+                    if (pattern[c] === 1) { 
+                        solutionData[r][c] = 1;
+                        totalSolutionBlack++;
+                    }
+                }
+            }
+
+            statusMessage.textContent = `Code 39 Barcode generated for: ${cleanedText}. Grid Size: ${GRID_WIDTH}x${GRID_HEIGHT}. Total black modules: ${totalSolutionBlack}. (Column Toggle Mode Active)`;
+            statusMessage.classList.remove('bg-red-100', 'text-red-800');
+            statusMessage.classList.add('bg-blue-100', 'text-blue-800');
+
+        }
+        
+        /**
+         * Generates a Rectangular Micro QR pattern (simulated by cropping).
+         */
+        function generateRmqrTarget(text, version) {
+            const { h, w } = RMQR_DIMENSIONS[version];
+            
+            initializeGrid(w, h);
+            
+            let sourceQr;
             try {
-                const qr = qrcode(0, 'L'); 
+                // Try to generate V1, fallback to Auto
+                sourceQr = qrcode(1, 'L');
+                sourceQr.addData(text);
+                sourceQr.make();
+            } catch (error) {
+                sourceQr = qrcode(0, 'L');
+                sourceQr.addData(text);
+                sourceQr.make();
+            }
+
+            const sourceSize = sourceQr.getModuleCount();
+            
+            const cropRStart = Math.max(0, Math.floor((sourceSize - h) / 2));
+            const cropCStart = Math.max(0, Math.floor((sourceSize - w) / 2));
+
+            totalSolutionBlack = 0;
+            for (let r = 0; r < h; r++) {
+                for (let c = 0; c < w; c++) {
+                    const sourceR = cropRStart + r;
+                    const sourceC = cropCStart + c;
+
+                    if (sourceR < sourceSize && sourceC < sourceSize) {
+                        if (sourceQr.isDark(sourceR, sourceC)) {
+                            solutionData[r][c] = 1;
+                            totalSolutionBlack++;
+                        }
+                    }
+                }
+            }
+
+            statusMessage.textContent = `rMQR Target generated (${version}: ${w}x${h}). Total black modules: ${totalSolutionBlack}.`;
+        }
+
+
+        /**
+         * Generates the QR code data for the input URL/text.
+         */
+        function generateQrTarget(text, version) {
+            try {
+                const qr = qrcode(version, 'L'); 
                 qr.addData(text);
                 qr.make();
 
                 const size = qr.getModuleCount();
-                initializeGrid(size); 
+                initializeGrid(size, size); 
                 
                 totalSolutionBlack = 0;
-                solutionData = Array(size).fill(0).map(() => Array(size).fill(0));
                 
                 for (let r = 0; r < size; r++) {
                     for (let c = 0; c < size; c++) {
@@ -385,38 +641,70 @@
                         }
                     }
                 }
-                
-                // Set messageBox to neutral ready state
-                messageBox.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'border-red-200', 'border-green-200', 'border-yellow-200');
-                messageBox.classList.add('bg-gray-100', 'text-gray-700', 'border-gray-200');
-                messageBox.innerHTML = `
-                    <p><strong>Puzzle Ready:</strong> Start guessing the pattern using your ${MAX_PLACEMENTS_PER_ROUND} placements per check.</p>
-                    <p class="mt-2 text-xs text-gray-500">Use the color hints after checking to guide your next round!</p>
-                `;
 
-                statusMessage.textContent = `Target generated. Grid Size: ${size}x${size}. Total black modules: ${totalSolutionBlack}. You have ${MAX_PLACEMENTS_PER_ROUND} placements remaining this round.`;
-                statusMessage.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-200', 'text-yellow-900');
-                statusMessage.classList.add('bg-blue-100', 'text-blue-800');
-
-                updateHintButtonUI();
+                let actualVersion = version;
+                if (typeof qr.getVersion === 'function') {
+                    actualVersion = qr.getVersion();
+                } else if (version === 0) {
+                     actualVersion = (size - 17) / 4;
+                }
                 
-                // HIDE save button
-                saveButton.style.display = 'none';
-                
-                draw(true);
+                statusMessage.textContent = `QR Target generated (Version ${actualVersion}). Grid Size: ${size}x${size}. Total black modules: ${totalSolutionBlack}. You have ${MAX_PLACEMENTS_PER_ROUND} placements remaining this round.`;
 
             } catch (error) {
                 console.error("QR Code Generation Error:", error);
-                statusMessage.textContent = 'Error generating QR code. Try a shorter input or a valid URL format.';
+                // More helpful error message for code length overflow
+                statusMessage.textContent = 'Error: Content is too long for the selected QR Version (capacity overflow). Try a shorter input or select a larger version.';
                 statusMessage.classList.remove('bg-blue-100');
                 statusMessage.classList.add('bg-red-100', 'text-red-800');
                 solutionData = []; 
                 hintButton.disabled = true;
                 hintButton.classList.add('opacity-50', 'cursor-not-allowed');
                 saveButton.style.display = 'none';
+                return;
             }
         }
         
+        /**
+         * Main entry point for generating the target based on mode selection.
+         */
+        function generateTarget() {
+            const content = document.getElementById('urlInput').value.trim();
+            const mode = modeSelect.value;
+            const version = versionSelect.value;
+
+            if (!content) {
+                statusMessage.textContent = 'Please enter content before generating a target pattern.';
+                statusMessage.classList.remove('bg-blue-100', 'bg-green-100', 'bg-yellow-200');
+                statusMessage.classList.add('bg-red-100', 'text-red-800');
+                return;
+            }
+            
+            puzzleMode = mode;
+            
+            // Set dynamic max placements based on mode/version
+            MAX_PLACEMENTS_PER_ROUND = MAX_PLACEMENTS_LOOKUP[version] || MAX_PLACEMENTS_LOOKUP.DEFAULT;
+
+            // Reset message box and generate
+            messageBox.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'border-red-200', 'border-green-200', 'border-yellow-200', 'bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
+            messageBox.classList.add('bg-gray-100', 'text-gray-700', 'border-gray-200');
+            messageBox.innerHTML = `<p><strong>Puzzle Ready:</strong> Start guessing the pattern using your ${MAX_PLACEMENTS_PER_ROUND} placements per check.</p><p class="mt-2 text-xs text-gray-500">Use the color hints after checking to guide your next round!</p>`;
+
+
+            if (mode === 'QR') {
+                generateQrTarget(content, parseInt(version));
+            } else if (mode === 'BARCODE') {
+                generateBarcodeTarget(content);
+            } else if (mode === 'rMQR') {
+                generateRmqrTarget(content, version);
+            }
+
+            updateHintButtonUI();
+            updateCheckedSquaresButtonUI();
+            updatePlacementLimitUI();
+            draw(true);
+        }
+
         /**
          * Checks how many correct black modules are adjacent (up, down, left, right) to the given cell.
          */
@@ -430,7 +718,7 @@
                 const nr = r + dr;
                 const nc = c + dc;
 
-                if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
+                if (nr >= 0 && nr < GRID_HEIGHT && nc >= 0 && nc < GRID_WIDTH) {
                     if (solutionData[nr][nc] === 1) {
                         count++;
                     }
@@ -438,7 +726,6 @@
             }
             return count;
         }
-
 
         /**
          * Compares the user's pattern against the solution and updates the visual feedback.
@@ -448,9 +735,11 @@
             
             const maxAllowedBlack = totalSolutionBlack + BLACK_COUNT_BUFFER;
 
-            // --- Failsafe: Check Relaxed Upper Limit ---
             if (currentBlackCount > maxAllowedBlack) {
-                messageBox.classList.remove('bg-yellow-100', 'bg-green-100', 'text-yellow-800', 'text-green-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-green-200', 'border-gray-200');
+                // Failsafe hit - Clear pending history
+                pendingClickHistory = [];
+                
+                messageBox.classList.remove('bg-yellow-100', 'bg-green-100', 'text-yellow-800', 'text-green-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-green-200', 'border-gray-200', 'bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
                 messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
                 messageBox.innerHTML = `🛑 **Failsafe:** You have painted **${currentBlackCount}** black modules, exceeding the max allowed (${maxAllowedBlack}). Remove some black modules to check!`;
                 
@@ -458,27 +747,26 @@
                 checkButton.disabled = true;
                 checkButton.classList.add('opacity-50', 'cursor-not-allowed');
                 checkButton.classList.remove('hover:bg-indigo-700');
-                saveButton.style.display = 'none'; // Ensure save button is hidden
+                saveButton.style.display = 'none'; 
+                draw(true);
                 return; 
             }
-            // --- End Failsafe Check ---
 
             let correctCount = 0;
             const hintCounts = { 4: 0, 5: 0, 6: 0, 7: 0, 2: 0 }; 
             
-            const mid = GRID_SIZE / 2;
+            const isSquare = (GRID_WIDTH === GRID_HEIGHT);
+            const mid = isSquare ? GRID_WIDTH / 2 : 0;
             const missingBlackMap = { TL: 0, TR: 0, BL: 0, BR: 0 };
 
-            for (let r = 0; r < GRID_SIZE; r++) {
-                for (let c = 0; c < GRID_SIZE; c++) {
+            for (let r = 0; r < GRID_HEIGHT; r++) {
+                for (let c = 0; c < GRID_WIDTH; c++) {
                     
                     if (userData[r][c] === 1) {
-                        // Scoring the user's black placement
                         if (solutionData[r][c] === 1) {
                             lastCheckStatus[r][c] = 1; // Green (Lock status)
                             correctCount++;
                         } else {
-                            // Incorrect guess - Determine proximity hint
                             const adjacentCount = getAdjacentBlackCount(r, c);
                             let status;
                             if (adjacentCount === 1) status = 4;
@@ -491,15 +779,12 @@
                             hintCounts[status]++;
                         }
                     } else {
-                        // User painted white.
-                        
-                        // IMPORTANT: Do NOT overwrite a previous correct (1) status.
                         if (lastCheckStatus[r][c] !== 1) {
-                             lastCheckStatus[r][c] = 3; // Neutral White status
+                             lastCheckStatus[r][c] = 0; 
                         }
                         
-                        // --- ANALYZE MISSING BLACKS FOR HINT ---
-                        if (solutionData[r][c] === 1) { // If it should be black but user left it white
+                        // Quadrant analysis only for square QR codes
+                        if (solutionData[r][c] === 1 && isSquare) { 
                             const rKey = r < mid ? 'T' : 'B';
                             const cKey = c < mid ? 'L' : 'R';
                             missingBlackMap[rKey + cKey]++;
@@ -508,40 +793,45 @@
                 }
             }
 
+            // --- History Merge (Only successful checks merge pending clicks) ---
+            allClickHistory.push(...pendingClickHistory);
+            pendingClickHistory = [];
+            isHistoryVisible = false; // Hide overlay after check
+
             // --- Determine Missing Quadrant Hint ---
-            let mostMissingQuadrant = 'No quadrant';
-            let maxMissing = 0;
-            
-            for (const key in missingBlackMap) {
-                if (missingBlackMap[key] > maxMissing) {
-                    maxMissing = missingBlackMap[key];
-                    mostMissingQuadrant = key;
-                }
-            }
-            
-            const readableQuadrant = {
-                TL: "Top Left", TR: "Top Right",
-                BL: "Bottom Left", BR: "Bottom Right"
-            }[mostMissingQuadrant] || 'No quadrant';
-            
             let hintMessage = "";
-            if (maxMissing > 0) {
-                hintMessage = `**Missing Hint:** Most missing black squares (${maxMissing}) are located in the **${readableQuadrant}** quadrant.`;
+            if (isSquare) {
+                let mostMissingQuadrant = 'No quadrant';
+                let maxMissing = 0;
+                
+                for (const key in missingBlackMap) {
+                    if (missingBlackMap[key] > maxMissing) {
+                        maxMissing = missingBlackMap[key];
+                        mostMissingQuadrant = key;
+                    }
+                }
+                
+                const readableQuadrant = { TL: "Top Left", TR: "Top Right", BL: "Bottom Left", BR: "Bottom Right" }[mostMissingQuadrant] || 'No quadrant';
+                
+                if (maxMissing > 0) {
+                    hintMessage = `**Missing Hint:** Most missing black squares (${maxMissing}) are located in the **${readableQuadrant}** quadrant.`;
+                } else {
+                    hintMessage = "You have correctly guessed all the necessary black modules! Check the hint colors to see if you have any misplaced black modules.";
+                }
             } else {
-                hintMessage = "You have correctly guessed all the necessary black modules! Check the hint colors to see if you have any misplaced black modules.";
+                 hintMessage = `Grid dimensions are ${GRID_WIDTH}x${GRID_HEIGHT}. Quadrant analysis is for square QR Codes only.`;
             }
+
 
             // --- Check for WIN CONDITION ---
             const isPerfectWin = correctCount === totalSolutionBlack && 
-                                 hintCounts[2] === 0 && 
-                                 hintCounts[4] === 0 && 
-                                 hintCounts[5] === 0 && 
-                                 hintCounts[6] === 0 && 
+                                 hintCounts[2] === 0 && hintCounts[4] === 0 && 
+                                 hintCounts[5] === 0 && hintCounts[6] === 0 && 
                                  hintCounts[7] === 0;
 
-            // --- Handle Solved State ---
             isSolved = isPerfectWin;
             updateHintButtonUI(); 
+            updateCheckedSquaresButtonUI();
 
 
             // --- Reset Round State ---
@@ -550,28 +840,33 @@
             checkButton.disabled = true;
             checkButton.classList.add('opacity-50', 'cursor-not-allowed');
             checkButton.classList.remove('hover:bg-indigo-700');
-            // --- End Reset ---
 
-            // Display results
+            // --- Score Display ---
             const percentage = (totalSolutionBlack > 0) ? (correctCount / totalSolutionBlack) * 100 : 0;
             
-            // Set message box colors based on result
-            messageBox.classList.remove('bg-gray-100', 'bg-red-100', 'text-gray-700', 'text-red-800', 'border-red-200', 'border-gray-200', 'border-green-200');
+            // Score simplification for Barcode mode
+            let displayCorrectCount = correctCount;
+            let displayTotalBlack = totalSolutionBlack;
+            if (puzzleMode === 'BARCODE') {
+                // Divide both by the height (10) to show score in terms of bars
+                displayCorrectCount = Math.floor(correctCount / GRID_HEIGHT);
+                displayTotalBlack = Math.floor(totalSolutionBlack / GRID_HEIGHT);
+            }
+            
+            messageBox.classList.remove('bg-gray-100', 'bg-red-100', 'text-gray-700', 'text-red-800', 'border-red-200', 'border-gray-200', 'border-green-200', 'bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
             
             let finalMessage;
 
             if (isPerfectWin) {
                 messageBox.classList.add('bg-green-100', 'text-green-800', 'border-green-200');
                 finalMessage = "🎉 **PERFECT VICTORY!** You solved the entire pattern!";
-                
-                // SHOW Save Button on Win
                 saveButton.style.display = 'block';
 
             } else {
                 messageBox.classList.add('bg-yellow-100', 'text-yellow-800', 'border-yellow-200');
                 
                 finalMessage = `
-                    <p class="mb-2"><strong>Score:</strong> ${correctCount}/${totalSolutionBlack} correct black modules found (${percentage.toFixed(1)}%).</p>
+                    <p class="mb-2"><strong>Score:</strong> ${displayCorrectCount}/${displayTotalBlack} correct black ${puzzleMode === 'BARCODE' ? 'bars' : 'modules'} found (${percentage.toFixed(1)}%).</p>
                     <p class="mb-2">${hintMessage}</p>
                     <hr class="border-yellow-300">
                     <div class="grid grid-cols-2 text-left mt-2 text-xs md:text-sm">
@@ -584,40 +879,46 @@
                     </div>
                     <p class="mt-4 text-sm">You have **${MAX_PLACEMENTS_PER_ROUND}** placements remaining this round.</p>
                 `;
-                // HIDE Save Button if not perfect
                 saveButton.style.display = 'none';
             }
             messageBox.innerHTML = finalMessage;
 
-            draw(true); // Redraw with the new status colors
+            draw(true); 
         }
 
         /**
-         * Saves the clean, solution QR code image by opening it in a new tab.
+         * Saves the clean, solution code image by opening it in a new tab.
          */
         function saveSolutionQrCode(event) {
             event.preventDefault(); 
             
             if (saveButton.style.display === 'none') return; 
 
-            // Create a temporary, clean canvas for export
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = EXPORT_SIZE;
             exportCanvas.height = EXPORT_SIZE;
             const exportCtx = exportCanvas.getContext('2d');
             
-            const exportCellSize = EXPORT_SIZE / GRID_SIZE;
+            const scaleFactor = Math.min(EXPORT_SIZE / (GRID_WIDTH * moduleWidth), EXPORT_SIZE / (GRID_HEIGHT * moduleHeight));
+            const finalWidth = GRID_WIDTH * moduleWidth * scaleFactor;
+            const finalHeight = GRID_HEIGHT * moduleHeight * scaleFactor;
 
-            // Draw white background
             exportCtx.fillStyle = 'white';
             exportCtx.fillRect(0, 0, EXPORT_SIZE, EXPORT_SIZE);
 
-            // Draw black modules (the solution)
-            for (let r = 0; r < GRID_SIZE; r++) {
-                for (let c = 0; c < GRID_SIZE; c++) {
+            const offsetX = (EXPORT_SIZE - finalWidth) / 2;
+            const offsetY = (EXPORT_SIZE - finalHeight) / 2;
+
+            for (let r = 0; r < GRID_HEIGHT; r++) {
+                for (let c = 0; c < GRID_WIDTH; c++) {
                     if (solutionData[r][c] === 1) {
                         exportCtx.fillStyle = 'black';
-                        exportCtx.fillRect(c * exportCellSize, r * exportCellSize, exportCellSize, exportCellSize);
+                        exportCtx.fillRect(
+                            offsetX + c * moduleWidth * scaleFactor, 
+                            offsetY + r * moduleHeight * scaleFactor, 
+                            moduleWidth * scaleFactor, 
+                            moduleHeight * scaleFactor
+                        );
                     }
                 }
             }
@@ -626,25 +927,23 @@
             const link = document.createElement('a');
             link.href = imageURL;
             link.target = '_blank'; 
-            link.download = `QRdle_Solved_${new Date().toISOString().slice(0, 10)}.png`;
+            link.download = `QRdle_Solved_${puzzleMode}_${new Date().toISOString().slice(0, 10)}.png`;
             
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
 
-            // Update success message
-            messageBox.classList.remove('bg-yellow-100', 'bg-red-100', 'text-yellow-800', 'text-red-800', 'bg-gray-100', 'text-gray-700', 'border-red-200', 'border-gray-200', 'border-yellow-200');
+            messageBox.classList.remove('bg-yellow-100', 'bg-red-100', 'text-yellow-800', 'text-red-800', 'bg-gray-100', 'text-gray-700', 'border-red-200', 'border-gray-200', 'border-yellow-200', 'bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
             messageBox.classList.add('bg-green-100', 'text-green-800', 'border-green-200');
-            messageBox.innerHTML = `✅ **Success!** The clean QR code image has opened in a new tab. Right-click or long-press the image in the new tab to save it.`;
+            messageBox.innerHTML = `✅ **Success!** The clean solution image has opened in a new tab.`;
             
-            // Restore original score message after a brief delay
             setTimeout(() => {
                 checkPattern(); 
             }, 3000);
         }
 
         /**
-         * Draws the current state of the grid, including hints.
+         * Draws the current state of the grid, including hints and the history overlay.
          */
         function draw(withGridLines = true) {
             ctx.fillStyle = '#f8f8f8';
@@ -653,62 +952,89 @@
 
             ctx.translate(panOffset.x, panOffset.y);
             ctx.scale(scale, scale);
+            
+            const drawWidth = GRID_WIDTH * moduleWidth;
+            const drawHeight = GRID_HEIGHT * moduleHeight;
 
-            // 1. Draw the white base for the QR block
             ctx.fillStyle = 'white';
-            ctx.fillRect(0, 0, QR_IMAGE_SIZE, QR_IMAGE_SIZE);
+            ctx.fillRect(0, 0, drawWidth, drawHeight);
 
-            // 2. Draw the user's modules with conditional coloring
-            for (let r = 0; r < GRID_SIZE; r++) {
-                for (let c = 0; c < GRID_SIZE; c++) {
+            for (let r = 0; r < GRID_HEIGHT; r++) {
+                for (let c = 0; c < GRID_WIDTH; c++) {
                     const status = lastCheckStatus[r][c];
                     let fill = null;
                     
-                    // Priority: Green > Hint colors > Black
-                    if (status === 1) fill = '#10B981'; // Green (Correct)
-                    else if (status === 2) fill = '#EF4444'; // Red (Completely Wrong)
-                    else if (status === 4) fill = '#FBBF24'; // Yellow (1 Adjacent)
-                    else if (status === 5) fill = '#CC9900'; // GOLDEN YELLOW (2 Adjacent) 
-                    else if (status === 6) fill = '#F97316'; // Orange (3 Adjacent)
-                    else if (status === 7) fill = '#9F1239'; // Dark Red (4+ Adjacent)
-                    else if (userData[r][c] === 1) fill = 'black'; // Unscored Black
+                    if (status === 1) fill = '#10B981'; 
+                    else if (status === 2) fill = '#EF4444'; 
+                    else if (status === 4) fill = '#FBBF24'; 
+                    else if (status === 5) fill = '#CC9900'; 
+                    else if (status === 6) fill = '#F97316'; 
+                    else if (status === 7) fill = '#9F1239'; 
+                    else if (userData[r][c] === 1) fill = 'black'; 
                     else fill = 'white';
                     
                     if (fill && fill !== 'white') {
                         ctx.fillStyle = fill;
-                        ctx.fillRect(c * CELL_SIZE, r * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                        ctx.fillRect(c * moduleWidth, r * moduleHeight, moduleWidth, moduleHeight);
                     }
                 }
             }
 
-            // 3. Draw Hint Circles (Blue for visibility)
-            ctx.fillStyle = '#3B82F6'; 
-            hintedCells.forEach(({ r, c }) => {
-                const centerX = c * CELL_SIZE + CELL_SIZE / 2;
-                const centerY = r * CELL_SIZE + CELL_SIZE / 2;
-                const radius = CELL_SIZE / 4;
+            if (isHistoryVisible) {
+                ctx.fillStyle = 'rgba(168, 85, 247, 0.5)'; // Fuchsia-600 with transparency
+                allClickHistory.forEach(({ r, c }) => {
+                    // For Barcode mode, history is tracked by column (r=-1), draw a full vertical bar
+                    if (puzzleMode === 'BARCODE' && r === -1) { 
+                        ctx.fillRect(c * moduleWidth, 0, moduleWidth, GRID_HEIGHT * moduleHeight);
+                    } else if (puzzleMode !== 'BARCODE') {
+                         // QR mode: Draw circle over individual cell
+                        const centerX = c * moduleWidth + moduleWidth / 2;
+                        const centerY = r * moduleHeight + moduleHeight / 2;
+                        const radius = Math.min(moduleWidth, moduleHeight) / 3; 
+                        ctx.beginPath();
+                        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                });
+            }
 
-                ctx.beginPath();
-                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-                ctx.fill();
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.7)'; // Blue-500 with transparency for hint circles
+            hintedCells.forEach(({ r, c }) => {
+                
+                // For Barcode mode, hint is tracked by column (r=-1), draw a full vertical bar
+                if (puzzleMode === 'BARCODE' && r === -1) {
+                    ctx.fillRect(c * moduleWidth, 0, moduleWidth, GRID_HEIGHT * moduleHeight);
+                } else if (puzzleMode !== 'BARCODE') {
+                    // QR mode: Draw circle over individual cell
+                    const centerX = c * moduleWidth + moduleWidth / 2;
+                    const centerY = r * moduleHeight + moduleHeight / 2;
+                    const radius = Math.min(moduleWidth, moduleHeight) / 4;
+
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             });
 
 
-            // 4. Draw the visible grid lines
             if (withGridLines) {
                 const gridColor = '#d1d5db'; 
                 ctx.strokeStyle = gridColor;
                 ctx.lineWidth = 1 / scale; 
                 
-                for (let i = 0; i <= GRID_SIZE; i++) {
-                    const coord = i * CELL_SIZE;
+                for (let i = 0; i <= GRID_WIDTH; i++) {
+                    const coord = i * moduleWidth;
                     ctx.beginPath();
                     ctx.moveTo(coord, 0);
-                    ctx.lineTo(coord, QR_IMAGE_SIZE);
+                    ctx.lineTo(coord, drawHeight);
                     ctx.stroke();
+                }
+
+                for (let i = 0; i <= GRID_HEIGHT; i++) {
+                    const coord = i * moduleHeight;
                     ctx.beginPath();
                     ctx.moveTo(0, coord);
-                    ctx.lineTo(QR_IMAGE_SIZE, coord);
+                    ctx.lineTo(drawWidth, coord);
                     ctx.stroke();
                 }
             }
@@ -720,174 +1046,413 @@
          * Toggles the cell state (white to black) based on game rules.
          */
         function toggleCell(row, col) {
-            if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE || solutionData.length === 0) {
+            if (row < 0 || row >= GRID_HEIGHT || col < 0 || col >= GRID_WIDTH || solutionData.length === 0) {
                 return false;
             }
 
-            const oldValue = userData[row][col];
-            const currentCoords = {r: row, c: col};
-            let moveAllowed = true;
-            
-            const placementIndex = placementsThisRound.findIndex(p => p.r === row && p.c === col);
-            const hintIndex = hintedCells.findIndex(p => p.r === row && p.c === col);
+            let moveAllowed = true; 
+            const isColumnCurrentlyBlack = userData[row][col] === 1;
 
-            // --- LOCK CHECK: Prevent removing correct (Green) squares ---
-            if (lastCheckStatus[row][col] === 1 && oldValue === 1) {
-                messageBox.classList.remove('bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-gray-200', 'border-green-200');
-                messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
-                messageBox.innerHTML = `🔒 **Locked:** This square is **correct (Green)** and cannot be removed!`;
-                draw(true);
-                return false; // Block the action
-            }
-            // --- END LOCK CHECK ---
+            if (puzzleMode === 'BARCODE') {
+                const column = col;
+                
+                // 1. Check for Locks
+                for (let r = 0; r < GRID_HEIGHT; r++) {
+                    if (lastCheckStatus[r][column] === 1) {
+                        messageBox.classList.remove('bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-gray-200', 'border-green-200', 'bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
+                        messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
+                        messageBox.innerHTML = `🔒 **Locked:** This column contains a **correct (Green)** module and cannot be changed!`;
+                        draw(true);
+                        return false; 
+                    }
+                }
+                
+                // 2. Determine Action
+                let isPlacement = !isColumnCurrentlyBlack;
+                
+                if (isPlacement && placementsThisRound.length >= MAX_PLACEMENTS_PER_ROUND) {
+                    moveAllowed = false;
+                }
 
-            if (oldValue === 0) { // White to Black toggle (Placement/Guess)
-                if (placementsThisRound.length < MAX_PLACEMENTS_PER_ROUND) {
-                    // Placement is allowed
-                    userData[row][col] = 1;
-                    currentBlackCount++;
-                    placementsThisRound.push(currentCoords); 
-                    if (hintIndex !== -1) hintedCells.splice(hintIndex, 1); // Remove hint circle if a placement is made on it
+                if (!moveAllowed) {
+                    messageBox.classList.remove('bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-gray-200', 'border-green-200', 'bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
+                    messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
+                    messageBox.innerHTML = `🛑 **Placement limit reached!** You must undo one of your **${MAX_PLACEMENTS_PER_ROUND}** column moves this round to place another.`;
+                    draw(true);
+                    return false; 
+                }
+
+                // 3. Apply the Toggle and Update State for the entire column
+                const coordKey = `${-1},${column}`;
+                const columnHint = { r: -1, c: column, key: coordKey };
+                
+                if (isPlacement) {
+                    currentBlackCount += GRID_HEIGHT;
+                    placementsThisRound.push({r: -1, c: column});
+                    // Add column marker to pending history
+                    if (!pendingClickHistory.some(c => c.key === coordKey)) {
+                        pendingClickHistory.push(columnHint);
+                    }
                 } else {
-                    // Placement limit reached
-                    moveAllowed = false; 
-                }
-            } else { // Black to White toggle (Undo)
-                userData[row][col] = 0;
-                currentBlackCount--;
-                
-                // Check if this undoes a guess made THIS ROUND
-                if (placementIndex !== -1) {
-                    placementsThisRound.splice(placementIndex, 1); 
+                    currentBlackCount -= GRID_HEIGHT;
+                    const placementIndex = placementsThisRound.findIndex(p => p.c === column && p.r === -1);
+                    if (placementIndex !== -1) {
+                        placementsThisRound.splice(placementIndex, 1); 
+                    }
+                    // Remove column marker from pending history
+                    pendingClickHistory = pendingClickHistory.filter(c => c.key !== coordKey);
                 }
                 
-                // If it was a hinted cell that was already black, remove the hint circle
-                if (hintIndex !== -1) {
-                   hintedCells.splice(hintIndex, 1);
+                const newValue = isColumnCurrentlyBlack ? 0 : 1;
+                
+                for (let r = 0; r < GRID_HEIGHT; r++) {
+                    userData[r][column] = newValue;
+                    lastCheckStatus[r][column] = 0;
                 }
+                // Remove hints if placed over
+                hintedCells = hintedCells.filter(h => h.c !== column);
+
+                isCellChanged = true;
+                
+            } else { // QR Code & rMQR Mode (Single-cell logic)
+                const oldValue = userData[row][col];
+                const currentCoords = {r: row, c: col};
+                const placementIndex = placementsThisRound.findIndex(p => p.r === row && p.c === col);
+                const hintIndex = hintedCells.findIndex(p => p.r === row && p.c === col);
+
+                if (lastCheckStatus[row][col] === 1 && oldValue === 1) {
+                    messageBox.classList.remove('bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-gray-200', 'border-green-200', 'bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
+                    messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
+                    messageBox.innerHTML = `🔒 **Locked:** This square is **correct (Green)** and cannot be removed!`;
+                    draw(true);
+                    return false; 
+                }
+                
+                let isPlacement = (oldValue === 0);
+
+                if (isPlacement) { 
+                    if (placementsThisRound.length < MAX_PLACEMENTS_PER_ROUND) {
+                        userData[row][col] = 1;
+                        currentBlackCount++;
+                        placementsThisRound.push(currentCoords); 
+                        if (hintIndex !== -1) hintedCells.splice(hintIndex, 1); 
+                    } else {
+                        moveAllowed = false; 
+                    }
+                } else { // Undo
+                    if (lastCheckStatus[row][col] !== 1) { 
+                        lastCheckStatus[row][col] = 0; 
+                    }
+                    userData[row][col] = 0;
+                    currentBlackCount--;
+                    
+                    if (placementIndex !== -1) {
+                        placementsThisRound.splice(placementIndex, 1); 
+                    }
+                    
+                    if (hintIndex !== -1) {
+                       hintedCells.splice(hintIndex, 1);
+                    }
+                    // Remove from pending history
+                    pendingClickHistory = pendingClickHistory.filter(c => c.r !== row || c.c !== col);
+                }
+
+                if (!moveAllowed) {
+                    messageBox.classList.remove('bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-gray-200', 'border-green-200', 'bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
+                    messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
+                    messageBox.innerHTML = `🛑 **Placement limit reached!** You must undo one of your **${MAX_PLACEMENTS_PER_ROUND}** specific moves this round to place another.`;
+                    draw(true);
+                    return false; 
+                }
+
+                // Add to pending history ONLY if the move was a successful placement
+                if (isPlacement && moveAllowed) {
+                    const coordKey = `${row},${col}`;
+                    if (!pendingClickHistory.some(c => c.key === coordKey)) {
+                         pendingClickHistory.push({ r: row, c: col, key: coordKey });
+                    }
+                }
+
+                if (lastCheckStatus[row][col] !== 1) {
+                    lastCheckStatus[row][col] = 0; 
+                }
+
+                isCellChanged = true;
             }
 
-            if (!moveAllowed) {
-                // Show warning
-                messageBox.classList.remove('bg-green-100', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'bg-gray-100', 'text-gray-700', 'border-yellow-200', 'border-gray-200', 'border-green-200');
-                messageBox.classList.add('bg-red-100', 'text-red-800', 'border-red-200');
-                messageBox.innerHTML = `🛑 **Placement limit reached!** You must undo one of your **${MAX_PLACEMENTS_PER_ROUND}** specific moves this round to place another.`;
-                draw(true);
-                return false; 
+            if (isHistoryVisible) {
+                isHistoryVisible = false;
             }
-            
-            // Reset status feedback for this cell (unless it's locked green)
-            if (lastCheckStatus[row][col] !== 1) {
-                lastCheckStatus[row][col] = 0; 
-            }
-            
-            // Any allowed move (placing or undoing) enables the check button
-            isCellChanged = true;
+
             checkButton.disabled = false;
             checkButton.classList.remove('opacity-50', 'cursor-not-allowed');
             checkButton.classList.add('hover:bg-indigo-700');
             
             draw(true);
             
-            // Update placements remaining message
-            statusMessage.textContent = `Target generated. Grid Size: ${GRID_SIZE}x${GRID_SIZE}. Total black modules: ${totalSolutionBlack}. You have ${MAX_PLACEMENTS_PER_ROUND - placementsThisRound.length} placements remaining this round.`;
+            const remaining = MAX_PLACEMENTS_PER_ROUND - placementsThisRound.length;
+            statusMessage.textContent = `Target generated. Grid Size: ${GRID_WIDTH}x${GRID_HEIGHT}. Total black modules: ${totalSolutionBlack}. You have ${remaining} placements remaining this round.`;
             statusMessage.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-200', 'text-yellow-900');
             statusMessage.classList.add('bg-blue-100', 'text-blue-800');
             
             return true;
         }
 
-        function updateHintButtonUI() {
-            hintCounter.textContent = hintsRemaining;
-            
-            // Disable if 0 hints left OR if the puzzle is solved
-            const isDisabled = hintsRemaining <= 0 || isSolved || solutionData.length === 0;
+        function showCheckedSquares() {
+            if (solutionData.length === 0 || isHistoryUsed) return; 
 
-            hintButton.disabled = isDisabled;
-            
-            if (isDisabled) {
-                hintButton.classList.add('opacity-50', 'cursor-not-allowed');
-                hintButton.classList.remove('hover:bg-yellow-600');
-            } else {
-                hintButton.classList.remove('opacity-50', 'cursor-not-allowed');
-                hintButton.classList.add('hover:bg-yellow-600');
-            }
+            isHistoryVisible = true; 
+            isHistoryUsed = true;    
+            updateCheckedSquaresButtonUI(); 
 
-            // Update button color classes
-            hintButton.classList.remove('bg-yellow-500', 'bg-gray-400');
-            hintButton.classList.add(isDisabled ? 'bg-gray-400' : 'bg-yellow-500');
-            
-            // Update counter color classes
-            hintCounter.classList.remove('bg-red-500', 'bg-gray-400');
-            hintCounter.classList.add(isDisabled ? 'bg-gray-400' : 'bg-red-500');
-        }
+            messageBox.classList.remove('bg-yellow-100', 'bg-red-100', 'text-yellow-800', 'text-red-800', 'bg-gray-100', 'text-gray-700', 'border-red-200', 'border-gray-200', 'border-yellow-200');
+            messageBox.classList.add('bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
+            messageBox.innerHTML = `🔮 **Click History Revealed!** Purple ${puzzleMode === 'BARCODE' ? 'bars' : 'circles'} show every square you've successfully interacted with. Click any square to hide this overlay. **This button is now disabled for this puzzle.**`;
 
-        function grantHint() {
-            if (hintsRemaining <= 0 || solutionData.length === 0 || isSolved) return;
-
-            hintsRemaining--;
-            updateHintButtonUI();
-
-            const potentialHints = [];
-            for (let r = 0; r < GRID_SIZE; r++) {
-                for (let c = 0; c < GRID_SIZE; c++) {
-                    // Find cells that: 1. Should be black, 2. User hasn't guessed black, 3. Not currently hinted
-                    if (solutionData[r][c] === 1 && userData[r][c] === 0 && !hintedCells.some(p => p.r === r && p.c === c)) {
-                        potentialHints.push({ r, c });
-                    }
-                }
-            }
-
-            // Select up to 3 random unique hints
-            const hintsToSelect = Math.min(3, potentialHints.length);
-
-            for (let i = 0; i < hintsToSelect; i++) {
-                const randomIndex = Math.floor(Math.random() * potentialHints.length);
-                const hint = potentialHints.splice(randomIndex, 1)[0];
-                hintedCells.push(hint);
-            }
-            
             draw(true);
         }
+
+        // --- Interaction Handlers (Pan/Click/Drag/Pinch) ---
         
-        function handleZoom(factor) {
-            scale *= factor;
-            scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+        function getTransformedCoordinates(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+
+            const translatedX = (x - panOffset.x) / scale;
+            const translatedY = (y - panOffset.y) / scale;
+
+            return { x: translatedX, y: translatedY };
+        }
+
+        function handleMouseDown(event) {
+            event.preventDefault(); 
+            
+            if (event.touches && event.touches.length > 1) {
+                isTouchDragging = false;
+                previousDistance = getDistance(event.touches);
+                return;
+            }
+
+            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
+            const clientY = event.clientY || (event.touches ? event.touches[0].clientY : 0);
+            
+            isDragging = true;
+            isTouchDragging = !!event.touches; 
+            isDrawing = false; 
+            lastMousePos = { x: clientX, y: clientY };
+            startClickPos = { x: clientX, y: clientY };
+            lastDrawCell = {r: -1, c: -1};
+
+            if (isTouchDragging || event.button === 0) { 
+                dragTimer = setTimeout(() => {
+                    isDrawing = true;
+                    // Initial click registration
+                    const { x, y } = getTransformedCoordinates(clientX, clientY);
+                    const col = Math.floor(x / moduleWidth);
+                    const row = Math.floor(y / moduleHeight);
+                    if (row >= 0 && row < GRID_HEIGHT && col >= 0 && col < GRID_WIDTH && solutionData.length > 0) {
+                         toggleCell(row, col);
+                         lastDrawCell = {r: row, c: col};
+                    }
+                }, DRAG_DELAY_MS);
+            }
+            
+            canvas.style.cursor = 'grab';
+        }
+
+        function handleMouseMove(event) {
+            event.preventDefault();
+            const isTouchEvent = !!event.touches;
+
+            // --- 2-Finger Pinch Zoom Logic (Touch only) ---
+            if (isTouchEvent && event.touches.length >= 2) {
+                if (dragTimer) {
+                    clearTimeout(dragTimer);
+                    dragTimer = null;
+                }
+                isDragging = false; 
+                isDrawing = false;
+                isHistoryVisible = false; 
+
+                const currentDistance = getDistance(event.touches);
+                if (previousDistance === null) {
+                    previousDistance = currentDistance;
+                    return;
+                }
+                
+                const factor = currentDistance / previousDistance;
+                const oldScale = scale;
+                
+                let maxScale = puzzleMode === 'BARCODE' ? BARCODE_MAX_SCALE : MAX_SCALE;
+                const newScale = Math.max(MIN_SCALE, Math.min(maxScale, scale * factor));
+
+                if (newScale !== oldScale) {
+                    const rect = canvas.getBoundingClientRect();
+                    const touchCenterX = (event.touches[0].clientX + event.touches[1].clientX) / 2 - rect.left;
+                    const touchCenterY = (event.touches[0].clientY + event.touches[1].clientY) / 2 - rect.top;
+
+                    const pointX = (touchCenterX - panOffset.x) / oldScale;
+                    const pointY = (touchCenterY - panOffset.y) / oldScale;
+                    
+                    scale = newScale;
+
+                    panOffset.x = touchCenterX - (pointX * scale);
+                    panOffset.y = touchCenterY - (pointY * scale);
+                }
+
+                previousDistance = currentDistance;
+                draw(true);
+                return;
+            }
+            
+            // --- 1-Finger Drag/Pan/Draw Logic ---
+            if (!isDragging) return;
+
+            const clientX = event.clientX || (event.touches ? event.touches[0].clientX : 0);
+            const clientY = event.clientY || (event.touches ? event.touches[0].clientY : 0);
+
+            const dx = clientX - lastMousePos.x;
+            const dy = clientY - lastMousePos.y;
+            
+            lastMousePos = { x: clientX, y: clientY };
+            
+            // --- DRAWING MODE (Priority 1) ---
+            if (isDrawing) {
+                const { x, y } = getTransformedCoordinates(clientX, clientY);
+                const col = Math.floor(x / moduleWidth);
+                const row = Math.floor(y / moduleHeight);
+
+                // Barcodes toggle the whole column, so we only need to check if the column has changed
+                if (puzzleMode === 'BARCODE' && col !== lastDrawCell.c) {
+                    toggleCell(row, col);
+                    lastDrawCell = {r: row, c: col};
+                } else if (puzzleMode === 'QR' || puzzleMode === 'rMQR') {
+                    if (row !== lastDrawCell.r || col !== lastDrawCell.c) {
+                        toggleCell(row, col);
+                        lastDrawCell = {r: row, c: col};
+                    }
+                }
+                return; 
+            }
+            
+            // --- PANNING MODE CHECK (Priority 2) ---
+            
+            const totalDx = clientX - startClickPos.x;
+            const totalDy = clientY - startClickPos.y;
+            
+            if (Math.sqrt(totalDx * totalDx + totalDy * totalDy) > MOVEMENT_TOLERANCE) {
+                if (dragTimer) {
+                    clearTimeout(dragTimer);
+                    dragTimer = null;
+                }
+                panOffset.x += dx;
+                panOffset.y += dy;
+                draw(true);
+            }
+        }
+
+        function handleMouseUp(event) {
+            previousDistance = null; 
+
+            if (!isDragging) return;
+            
+            const clientX = event.clientX || (event.changedTouches ? event.changedTouches[0].clientX : 0);
+            const clientY = event.clientY || (event.changedTouches ? event.changedTouches[0].clientY : 0);
+
+            const dx = clientX - startClickPos.x;
+            const dy = clientY - startClickPos.y;
+            
+            isDragging = false;
+            isTouchDragging = false;
+            canvas.style.cursor = 'grab';
+
+            if (dragTimer) {
+                clearTimeout(dragTimer);
+                dragTimer = null;
+            }
+
+            // If it was a "click" (minimal movement AND timer didn't trigger drawing mode)
+            if (!isDrawing && Math.sqrt(dx * dx + dy * dy) < MOVEMENT_TOLERANCE) {
+                const { x, y } = getTransformedCoordinates(clientX, clientY);
+                const col = Math.floor(x / moduleWidth);
+                const row = Math.floor(y / moduleHeight);
+
+                if (row >= 0 && row < GRID_HEIGHT && col >= 0 && col < GRID_WIDTH && solutionData.length > 0) {
+                    toggleCell(row, col);
+                }
+            }
+            
+            isDrawing = false; 
+        }
+
+        function handleTouchEnd(event) {
+            if (event.touches.length === 0) {
+                 handleMouseUp(event);
+            }
+            previousDistance = null; 
+        }
+
+        function handleZoom(factor, clientX, clientY) {
+            const oldScale = scale;
+            
+            let maxScale = puzzleMode === 'BARCODE' ? BARCODE_MAX_SCALE : MAX_SCALE;
+            const newScale = Math.max(MIN_SCALE, Math.min(maxScale, scale * factor));
+
+            if (newScale !== oldScale) {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = clientX - rect.left;
+                const mouseY = clientY - rect.top;
+
+                const pointX = (mouseX - panOffset.x) / oldScale;
+                const pointY = (mouseY - panOffset.y) / oldScale;
+                
+                scale = newScale;
+
+                panOffset.x = mouseX - (pointX * scale);
+                panOffset.y = mouseY - (pointY * scale);
+            }
+
             draw(true);
         }
 
         function handleWheel(event) {
             event.preventDefault();
             const factor = event.deltaY < 0 ? 1.1 : 0.9;
-            handleZoom(factor);
+            handleZoom(factor, event.clientX, event.clientY);
         }
+
 
         function resetView() {
             scale = 1.0;
-            panOffset = { x: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2, y: (CANVAS_DIMENSION - QR_IMAGE_SIZE) / 2 };
+            const drawWidth = GRID_WIDTH * moduleWidth;
+            const drawHeight = GRID_HEIGHT * moduleHeight;
+            panOffset = { 
+                x: (CANVAS_DIMENSION - drawWidth) / 2, 
+                y: (CANVAS_DIMENSION - drawHeight) / 2 
+            };
             draw(true);
         }
         
         function wipeGrid() {
             if (solutionData.length > 0) {
-                const previousGridSize = GRID_SIZE;
-                initializeGrid(previousGridSize); 
+                initializeGrid(GRID_WIDTH, GRID_HEIGHT); 
                 
-                // --- MESSAGE BOX PERSISTENCE ---
-                messageBox.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'border-red-200', 'border-green-200', 'border-yellow-200');
+                const version = versionSelect.value;
+                MAX_PLACEMENTS_PER_ROUND = MAX_PLACEMENTS_LOOKUP[version] || MAX_PLACEMENTS_LOOKUP.DEFAULT;
+
+                messageBox.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-100', 'text-yellow-800', 'border-red-200', 'border-green-200', 'border-yellow-200', 'bg-fuchsia-100', 'text-fuchsia-800', 'border-fuchsia-200');
                 messageBox.classList.add('bg-gray-100', 'text-gray-700', 'border-gray-200');
                 messageBox.innerHTML = `
-                    <p><strong>Grid Wiped:</strong> Ready for a fresh start.</p>
+                    <p><strong>Grid Wiped:</strong> Ready for a fresh start. History reset.</p>
                     <p class="mt-2 text-xs text-gray-500">Make your ${MAX_PLACEMENTS_PER_ROUND} placements and press 'Check Pattern' for the first hint!</p>
                 `;
-                // --- END PERSISTENCE ---
 
                 draw(true);
-                statusMessage.textContent = `Grid wiped. Paint the ${GRID_SIZE}x${GRID_SIZE} pattern. Total black modules: ${totalSolutionBlack}. You have ${MAX_PLACEMENTS_PER_ROUND} placements remaining this round.`;
+                statusMessage.textContent = `Grid wiped. Paint the ${GRID_WIDTH}x${GRID_HEIGHT} pattern. Total black modules: ${totalSolutionBlack}. You have ${MAX_PLACEMENTS_PER_ROUND} placements remaining this round.`;
                 statusMessage.classList.remove('bg-red-100', 'bg-green-100', 'text-red-800', 'text-green-800', 'bg-yellow-200', 'text-yellow-900');
                 statusMessage.classList.add('bg-blue-100', 'text-blue-800');
                 
-                // HIDE save button on wipe
                 saveButton.style.display = 'none';
             } else {
                  statusMessage.textContent = `Please generate a target pattern first!`;
@@ -903,43 +1468,42 @@
             canvas = document.getElementById('qrCanvas');
             ctx = canvas.getContext('2d');
             
-            // Interaction
+            // Interaction: Mouse
             canvas.addEventListener('mousedown', handleMouseDown);
             canvas.addEventListener('mousemove', handleMouseMove);
             window.addEventListener('mouseup', handleMouseUp); 
-            canvas.addEventListener('touchstart', handleMouseDown);
-            canvas.addEventListener('touchmove', handleMouseMove);
-            canvas.addEventListener('touchend', handleMouseUp);
+            
+            // Interaction: Touch 
+            canvas.addEventListener('touchstart', handleMouseDown, { passive: false });
+            canvas.addEventListener('touchmove', handleMouseMove, { passive: false });
+            canvas.addEventListener('touchend', handleTouchEnd);
+            canvas.addEventListener('touchcancel', handleTouchEnd);
+
 
             // Zoom/View
             canvas.addEventListener('wheel', handleWheel);
-            document.getElementById('zoomInButton').addEventListener('click', () => handleZoom(1.2));
-            document.getElementById('zoomOutButton').addEventListener('click', () => handleZoom(0.8));
+            document.getElementById('zoomInButton').addEventListener('click', (e) => handleZoom(1.2, e.clientX, e.clientY));
+            document.getElementById('zoomOutButton').addEventListener('click', (e) => handleZoom(0.8, e.clientX, e.clientY));
             document.getElementById('resetViewButton').addEventListener('click', resetView);
             
-            // Game Flow
-            document.getElementById('generateButton').addEventListener('click', () => {
-                const url = document.getElementById('urlInput').value.trim();
-                if (url) {
-                    generateQrTarget(url);
-                } else {
-                    statusMessage.textContent = 'Please enter a URL or text before generating a target pattern.';
-                    statusMessage.classList.remove('bg-blue-100', 'bg-green-100', 'bg-yellow-200');
-                    statusMessage.classList.add('bg-red-100', 'text-red-800');
-                }
-            });
+            // UI Mode Listeners
+            modeSelect.addEventListener('change', updateVersionSelectorVisibility);
             
+            // Game Flow
+            document.getElementById('generateButton').addEventListener('click', generateTarget);
             checkButton.addEventListener('click', checkPattern);
             document.getElementById('clearButton').addEventListener('click', wipeGrid);
             
             // Feature Listeners
             document.getElementById('saveButton').addEventListener('click', saveSolutionQrCode);
             hintButton.addEventListener('click', grantHint);
+            checkedSquaresButton.addEventListener('click', showCheckedSquares);
 
 
-            initializeGrid(GRID_SIZE);
+            // Initial setup (Uses current default mode: QR Code, Version 1)
+            updateVersionSelectorVisibility();
+            initializeGrid(21, 21); // Default QR V1 size
             draw(true);
-            updateHintButtonUI();
         };
 
     </script>
